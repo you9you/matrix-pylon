@@ -10,9 +10,9 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/rs/zerolog v1.35.1
 	github.com/tidwall/gjson v1.19.0
-	go.mau.fi/util v0.9.10
+	go.mau.fi/util v0.9.11
 	gopkg.in/yaml.v3 v3.0.1
-	maunium.net/go/mautrix v0.28.1
+	maunium.net/go/mautrix v0.29.0
 )
 
 require (
@@ -21,9 +21,9 @@ require (
 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
 	github.com/lib/pq v1.12.3 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
-	github.com/mattn/go-isatty v0.0.22 // indirect
+	github.com/mattn/go-isatty v0.0.23 // indirect
 	github.com/mattn/go-sqlite3 v1.14.48 // indirect
-	github.com/petermattis/goid v0.0.0-20260713124913-97594f28f5ca // indirect
+	github.com/petermattis/goid v0.0.0-20260716134002-a9b348f0a2b9 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/skip2/go-qrcode v0.0.0-20200617195104-da1b6568686e // indirect
 	github.com/tidwall/match v1.2.0 // indirect
@@ -32,7 +32,7 @@ require (
 	github.com/yuin/goldmark v1.8.4 // indirect
 	go.mau.fi/zeroconfig v0.2.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597 // indirect
+	golang.org/x/exp v0.0.0-20260718201538-764159d718ef // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

@@ -245,7 +245,6 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 		var part *bridgev2.ConvertedMessagePart
 
 		mediaParts := make([]*bridgev2.ConvertedMessagePart, 0)
-		mentions := make([]string, 0)
 
 		var contentBuilder strings.Builder
 
@@ -271,7 +270,6 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 					target = "room" // Matrix's mention all
 				}
 				fmt.Fprintf(&contentBuilder, "@%s", target)
-				mentions = append(mentions, target)
 			case *onebot.ImageSegment:
 				// mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
 				// fmt.Fprint(&contentBuilder, "[Image]")
@@ -372,10 +370,6 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 				}
 			}
 		}
-
-		// Mentions
-		part.Content.Mentions = &event.Mentions{}
-		mc.addMentions(ctx, mentions, part.Content)
 
 		*slicePtr = append(*slicePtr, part)
 	}
