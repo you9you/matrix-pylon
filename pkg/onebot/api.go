@@ -124,6 +124,28 @@ func (c *Client) DeleteMessage(messageID string) error {
 	return err
 }
 
+func (c *Client) DownloadForwardMsg(seg *ForwardSegment) ([]Message, error) {
+	request := NewGetForwardMsgRequest(seg.ID())
+
+	if resp, err := c.request(request); err == nil {
+		var f ForwardInfo
+		if err := mapstructure.WeakDecode(resp, &f); err != nil {
+			return nil, err
+		}
+
+		// 需要将 []interface{} 转换为 []ISegment
+		for i, msg := range f.Messages {
+			if msgs, ok := msg.Message.([]any); ok {
+				f.Messages[i].Message = generateSegments(msgs)
+			}
+		}
+
+		return f.Messages, nil
+	}
+
+	return nil, fmt.Errorf("failed to download forward: %+v", seg)
+}
+
 func (c *Client) DownloadMedia(seg ISegment) (string, []byte, error) {
 	var request *Request
 	var url string

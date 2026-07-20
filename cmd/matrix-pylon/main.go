@@ -19,7 +19,7 @@ func main() {
 		Name:        "mautrix-pylon",
 		URL:         "https://github.com/duo/matrix-pylon",
 		Description: "A Matrix-Pylon puppeting bridge.",
-		Version:     "0.0.3",
+		Version:     "0.0.4",
 		Connector:   &connector.PylonConnector{},
 	}
 

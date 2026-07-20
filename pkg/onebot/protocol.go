@@ -143,8 +143,10 @@ func NewGetRecordRequest(fileID string) *Request {
 	return &Request{
 		Action: string(GetRecord),
 		Params: map[string]interface{}{
-			"file":       fileID,
-			"out_format": "ogg",
+			"file": fileID,
+
+			// FIXME: "Download failed: Encoder not found"
+			// "out_format": "ogg",
 		},
 	}
 }
@@ -260,6 +262,11 @@ type FileInfo struct {
 	FileName string `json:"file_name,omitempty" mapstructure:"file_name,omitempty"`
 	URL      string `json:"url,omitempty" mapstructure:"url,omitempty"`
 	Base64   string `json:"base64,omitempty" mapstructure:"base64,omitempty"`
+}
+
+// 对应 NapCat get_forward_msg 返回的 data 根节点
+type ForwardInfo struct {
+	Messages []Message `json:"messages" mapstructure:"messages"`
 }
 
 type SendMessageResponse struct {

@@ -7,6 +7,7 @@ import (
 	"math"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/duo/matrix-pylon/pkg/ids"
 	"github.com/duo/matrix-pylon/pkg/onebot"
@@ -20,6 +21,14 @@ import (
 	"maunium.net/go/mautrix/format"
 	"maunium.net/go/mautrix/id"
 )
+
+// 声明一个切片池，预分配大小为 1024(用于处理Forward消息)
+var slicePool = sync.Pool{
+	New: func() any {
+		s := make([]*bridgev2.ConvertedMessagePart, 0, 1024)
+		return &s // 放入指针以避免值拷贝
+	},
+}
 
 func (mc *MessageConverter) OnebotToMatrix(
 	ctx context.Context,
@@ -62,6 +71,10 @@ func (mc *MessageConverter) OnebotToMatrix(
 			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
 			fmt.Fprint(&contentBuilder, "[Image]")
 		case *onebot.RecordSegment:
+
+			//BUG: failed to download attachment: failed to download media: &{Segment:{Type:record Data:map[file:<REMOVE>.amr file_size:31028 path:/app/.config/QQ/nt_qq_<REMOVE>/nt_data/Ptt/2026-07/Ori/<REMOVE>.amr url:https://multimedia.nt.qq.com.cn/download?appid=1402&fileid=<REMOVE>&format=amr&rkey=<REMOVE>]}}
+			// pkg/onebot/protocol.go:148
+
 			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
 			fmt.Fprint(&contentBuilder, "[Voice]")
 		case *onebot.VideoSegment:
@@ -75,7 +88,29 @@ func (mc *MessageConverter) OnebotToMatrix(
 				MessageID: ids.MakeMessageID(ids.GetPeerID(msg), v.ID()),
 			}
 		case *onebot.ForwardSegment:
-			fmt.Fprint(&contentBuilder, "[Chat History]")
+			//TODO: 实现显示合并消息
+
+			// 从池子中获取一个已经分配好内存的切片指针
+			slicePtr := slicePool.Get().(*[]*bridgev2.ConvertedMessagePart)
+
+			// 用完归还，供其他协程复用，极大地减少了 GC 压力
+			defer slicePool.Put(slicePtr)
+
+			// 每次使用前，务必清空长度（保留容量）
+			*slicePtr = (*slicePtr)[:0]
+
+			err := mc.convertForwardMessage(slicePtr, ctx, client, v)
+			if err == nil {
+				// 因为要归还池子，这里必须创建一个独立长度的切片并复制数据
+				finalParts := make([]*bridgev2.ConvertedMessagePart, len(*slicePtr))
+				copy(finalParts, *slicePtr)
+
+				cm.Parts = finalParts
+				return cm
+			} else {
+				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+			}
+
 		case *onebot.ShareSegment:
 			part = mc.convertShareMessage(v.Title(), v.Content(), v.URL())
 		case *onebot.JSONSegment:
@@ -119,6 +154,11 @@ func (mc *MessageConverter) OnebotToMatrix(
 	// Mentions
 	part.Content.Mentions = &event.Mentions{}
 	mc.addMentions(ctx, mentions, part.Content)
+
+	// 确保 part 有 ID
+	if part != nil && part.ID == "" {
+		part.ID = "0" // 或其他唯一值
+	}
 
 	cm.Parts = []*bridgev2.ConvertedMessagePart{part}
 
@@ -193,6 +233,163 @@ func (mc *MessageConverter) convertLocationMessage(name, address string, latitud
 	}
 }
 
+func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.ConvertedMessagePart, ctx context.Context, client *onebot.Client, seg *onebot.ForwardSegment) error {
+	//TODO: matrix 使用消息线程（Threading）回复
+
+	data, err := getClient(ctx).DownloadForwardMsg(seg)
+	if err != nil {
+		return fmt.Errorf("failed to download attachment: %w", err)
+	}
+
+	for i, msg := range data {
+		var part *bridgev2.ConvertedMessagePart
+
+		mediaParts := make([]*bridgev2.ConvertedMessagePart, 0)
+		mentions := make([]string, 0)
+
+		var contentBuilder strings.Builder
+
+		// 发送者信息
+		fmt.Fprintf(&contentBuilder, "[Forward]%s(%s)\n", msg.Sender.Nickname, msg.Sender.UserID)
+
+		// 大概率单个文件
+		var hasImage = false
+		var isForward = false
+
+		segments := msg.Message.([]onebot.ISegment)
+		for _, s := range segments {
+			zerolog.Ctx(ctx).Info().Msg(fmt.Sprintf("%#v", s))
+
+			switch v := s.(type) {
+			case *onebot.TextSegment:
+				fmt.Fprint(&contentBuilder, convertOnebotEmoji(client, v.Content()))
+			case *onebot.FaceSegment:
+				fmt.Fprint(&contentBuilder, convertOnebotFace(client, v.ID()))
+			case *onebot.AtSegment:
+				target := v.Target()
+				if target == "all" {
+					target = "room" // Matrix's mention all
+				}
+				fmt.Fprintf(&contentBuilder, "@%s", target)
+				mentions = append(mentions, target)
+			case *onebot.ImageSegment:
+				// mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
+				// fmt.Fprint(&contentBuilder, "[Image]")
+				hasImage = true
+				p := mc.convertMediaMessage(ctx, v)
+				mediaParts = append(mediaParts, p)
+				fmt.Fprintf(&contentBuilder, "![%s](%s)\n", p.Content.FileName, p.Content.URL)
+			case *onebot.MarketFaceSegment:
+				// mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
+				// fmt.Fprint(&contentBuilder, "[Image]")
+				p := mc.convertMediaMessage(ctx, v)
+				mediaParts = append(mediaParts, p)
+				fmt.Fprintf(&contentBuilder, "![%s](%s)\n", p.Content.FileName, p.Content.URL)
+			case *onebot.RecordSegment:
+
+				//BUG: failed to download attachment: failed to download media: &{Segment:{Type:record Data:map[file:<REMOVE>.amr file_size:31028 path:/app/.config/QQ/nt_qq_<REMOVE>/nt_data/Ptt/2026-07/Ori/<REMOVE>.amr url:https://multimedia.nt.qq.com.cn/download?appid=1402&fileid=-<REMOVE>&format=amr&rkey=<REMOVE>]}}
+				// pkg/onebot/protocol.go:148
+
+				mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
+				fmt.Fprint(&contentBuilder, "[Voice]")
+			case *onebot.VideoSegment:
+				mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
+				fmt.Fprint(&contentBuilder, "[Video]")
+			case *onebot.FileSegment:
+				mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
+				fmt.Fprint(&contentBuilder, "[File]")
+			case *onebot.ReplySegment:
+				// cm.ReplyTo = &networkid.MessageOptionalPartID{
+				// 	MessageID: ids.MakeMessageID(ids.GetPeerID(&msg), v.ID()),
+				// }
+				//TODO
+			case *onebot.ForwardSegment:
+				//TODO: 递归实现显示合并消息
+				// fmt.Fprint(&contentBuilder, "[Chat History]")
+
+				err := mc.convertForwardMessage(slicePtr, ctx, client, v)
+				if err == nil {
+					isForward = true
+				} else {
+					fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+				}
+			case *onebot.ShareSegment:
+				part = mc.convertShareMessage(v.Title(), v.Content(), v.URL())
+			case *onebot.JSONSegment:
+				part = mc.convertJSONMessage(ctx, v)
+			default:
+				fmt.Fprintf(&contentBuilder, "[%s]", v.SegmentType())
+			}
+		}
+
+		if isForward {
+			continue
+		}
+
+		if !hasImage && part == nil {
+			if len(mediaParts) == 1 {
+				// 转发者信息
+				*slicePtr = append(*slicePtr, &bridgev2.ConvertedMessagePart{
+					ID:   networkid.PartID(fmt.Sprintf("%d-0", i)),
+					Type: event.EventMessage,
+					Content: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    fmt.Sprintf("[Forward]%s(%s)\n", msg.Sender.Nickname, msg.Sender.UserID),
+					},
+				})
+
+				// 文件
+				part = mediaParts[0]
+				part.ID = networkid.PartID(fmt.Sprintf("%d-1", i))
+			} else if len(mediaParts) >= 1 { // mixed image and text
+				// mediaParts仅用作判断
+				// var imagesMarkdown strings.Builder
+				// for _, part := range mediaParts {
+				// 	fmt.Fprintf(&imagesMarkdown, "![%s](%s)\n", part.Content.FileName, part.Content.URL)
+				// }
+
+				content := contentBuilder.String()
+				rendered := format.RenderMarkdown(content, true, false)
+
+				part = &bridgev2.ConvertedMessagePart{
+					ID:   networkid.PartID(fmt.Sprintf("%d", i)),
+					Type: event.EventMessage,
+					Content: &event.MessageEventContent{
+						MsgType:       event.MsgText,
+						Format:        event.FormatHTML,
+						Body:          content,
+						FormattedBody: rendered.FormattedBody,
+					},
+				}
+			} else {
+				part = &bridgev2.ConvertedMessagePart{
+					ID:   networkid.PartID(fmt.Sprintf("%d", i)),
+					Type: event.EventMessage,
+					Content: &event.MessageEventContent{
+						MsgType: event.MsgText,
+						Body:    contentBuilder.String(),
+					},
+				}
+			}
+		}
+
+		// Mentions
+		part.Content.Mentions = &event.Mentions{}
+		mc.addMentions(ctx, mentions, part.Content)
+
+		*slicePtr = append(*slicePtr, part)
+	}
+
+	return nil
+
+	// FIXME: https://github.com/mautrix/go 暂不支持m.thread
+	// 暂时以文字的形式显示
+	// [FORWARD]user1:
+	// aaa
+	// [FORWARD]user2:
+	// [IMAGE]
+}
+
 func (mc *MessageConverter) convertShareMessage(title, desc, url string) *bridgev2.ConvertedMessagePart {
 	body := fmt.Sprintf("%s\n\n%s\n\n%s", title, desc, url)
 	rendered := format.RenderMarkdown(
@@ -263,7 +460,7 @@ func (mc *MessageConverter) makeMediaFailure(ctx context.Context, err error) *br
 		Type: event.EventMessage,
 		Content: &event.MessageEventContent{
 			MsgType: event.MsgNotice,
-			Body:    fmt.Sprintf("Failed to upload Onebot attachment"),
+			Body:    fmt.Sprintf("Failed to upload Onebot attachment: %s", err),
 		},
 	}
 }

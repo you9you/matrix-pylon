@@ -326,7 +326,11 @@ func (pc *PylonClient) updateMemberDisplyname(ctx context.Context, portal *bridg
 	_, peerID := ids.ParsePortalID(portal.ID)
 	if members, err := pc.client.GetGroupMemberList(peerID); err == nil {
 		for _, member := range members {
-			memberIntent := portal.GetIntentFor(ctx, pc.makeEventSender(member.UserID), pc.userLogin, bridgev2.RemoteEventChatInfoChange)
+			memberIntent, ok := portal.GetIntentFor(ctx, pc.makeEventSender(member.UserID), pc.userLogin, bridgev2.RemoteEventChatInfoChange)
+			if !ok {
+				zerolog.Ctx(ctx).Err(err).Msg("Failed to get member info")
+				continue
+			}
 
 			mxid := memberIntent.GetMXID()
 
