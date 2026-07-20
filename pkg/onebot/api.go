@@ -127,7 +127,9 @@ func (c *Client) DeleteMessage(messageID string) error {
 func (c *Client) DownloadForwardMsg(seg *ForwardSegment) ([]Message, error) {
 	request := NewGetForwardMsgRequest(seg.ID())
 
-	if resp, err := c.request(request); err == nil {
+	resp, err := c.request(request)
+
+	if err == nil {
 		var f ForwardInfo
 		if err := mapstructure.WeakDecode(resp, &f); err != nil {
 			return nil, err
@@ -142,6 +144,11 @@ func (c *Client) DownloadForwardMsg(seg *ForwardSegment) ([]Message, error) {
 
 		return f.Messages, nil
 	}
+
+	c.log.Error().
+		Err(err).
+		Str("seg", fmt.Sprintf("%+v", seg)).
+		Msg("failed to download forward")
 
 	return nil, fmt.Errorf("failed to download forward: %+v", seg)
 }

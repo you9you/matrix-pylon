@@ -257,8 +257,6 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 
 		segments := msg.Message.([]onebot.ISegment)
 		for _, s := range segments {
-			zerolog.Ctx(ctx).Info().Msg(fmt.Sprintf("%#v", s))
-
 			switch v := s.(type) {
 			case *onebot.TextSegment:
 				fmt.Fprint(&contentBuilder, convertOnebotEmoji(client, v.Content()))
