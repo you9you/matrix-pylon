@@ -41,7 +41,25 @@ func (mc *MessageConverter) OnebotToMatrix(
 
 	var contentBuilder strings.Builder
 
-	segments := msg.Message.([]onebot.ISegment)
+	segments, ok := msg.Message.([]onebot.ISegment)
+	if !ok {
+
+		zerolog.Ctx(ctx).Error().Any("message", msg.Message).Msg("无法断言segments")
+
+		part = &bridgev2.ConvertedMessagePart{
+			ID:   "0",
+			Type: event.EventMessage,
+			Content: &event.MessageEventContent{
+				MsgType: event.MsgText,
+				Body:    fmt.Sprintf("[Error] 无法断言segments\n%v", msg.Message),
+			},
+		}
+
+		cm.Parts = []*bridgev2.ConvertedMessagePart{part}
+
+		return cm
+	}
+
 	for _, s := range segments {
 		switch v := s.(type) {
 		case *onebot.TextSegment:
@@ -62,6 +80,10 @@ func (mc *MessageConverter) OnebotToMatrix(
 			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
 			fmt.Fprint(&contentBuilder, "[Image]")
 		case *onebot.RecordSegment:
+
+			//BUG: failed to download attachment: failed to download media: &{Segment:{Type:record Data:map[file:<REMOVE>.amr file_size:31028 path:/app/.config/QQ/nt_qq_<REMOVE>/nt_data/Ptt/2026-07/Ori/<REMOVE>.amr url:https://multimedia.nt.qq.com.cn/download?appid=1402&fileid=<REMOVE>&format=amr&rkey=<REMOVE>]}}
+			// pkg/onebot/protocol.go#NewGetRecordRequest
+
 			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
 			fmt.Fprint(&contentBuilder, "[Voice]")
 		case *onebot.VideoSegment:
@@ -75,7 +97,24 @@ func (mc *MessageConverter) OnebotToMatrix(
 				MessageID: ids.MakeMessageID(ids.GetPeerID(msg), v.ID()),
 			}
 		case *onebot.ForwardSegment:
-			fmt.Fprint(&contentBuilder, "[Chat History]")
+			// 实现显示合并消息
+
+			data, err := v.Content()
+			if err != nil {
+				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", fmt.Errorf("failed to download forwardMsg: %w", err))
+			} else if len(data) == 0 {
+				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", fmt.Errorf("failed to download forwardMsg: %w", fmt.Errorf("len(data) == 0")))
+			} else {
+				// 最外层 forwardId 应为0
+				parts, err := mc.convertForwardMessage(ctx, client, portal, intent, data, msg, 0)
+				if err == nil {
+					cm.Parts = parts
+					return cm
+				} else {
+					fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+				}
+			}
+
 		case *onebot.ShareSegment:
 			part = mc.convertShareMessage(v.Title(), v.Content(), v.URL())
 		case *onebot.JSONSegment:
@@ -119,6 +158,11 @@ func (mc *MessageConverter) OnebotToMatrix(
 	// Mentions
 	part.Content.Mentions = &event.Mentions{}
 	mc.addMentions(ctx, mentions, part.Content)
+
+	// 确保 part 有 ID
+	if part != nil && part.ID == "" {
+		part.ID = "0" // 或其他唯一值
+	}
 
 	cm.Parts = []*bridgev2.ConvertedMessagePart{part}
 
@@ -263,7 +307,7 @@ func (mc *MessageConverter) makeMediaFailure(ctx context.Context, err error) *br
 		Type: event.EventMessage,
 		Content: &event.MessageEventContent{
 			MsgType: event.MsgNotice,
-			Body:    fmt.Sprintf("Failed to upload Onebot attachment"),
+			Body:    fmt.Sprintf("Failed to upload Onebot attachment: %s", err),
 		},
 	}
 }
@@ -286,6 +330,9 @@ func (mc *MessageConverter) addMentions(ctx context.Context, mentions []string, 
 		if err != nil {
 			zerolog.Ctx(ctx).Err(err).Str("id", id).Msg("Failed to get user info")
 			continue
+		}
+		if displayname == "" {
+			displayname = mxid.String()
 		}
 		into.Mentions.UserIDs = append(into.Mentions.UserIDs, mxid)
 		mentionText := "@" + id

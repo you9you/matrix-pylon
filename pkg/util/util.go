@@ -8,9 +8,11 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gabriel-vasile/mimetype"
 
@@ -20,51 +22,36 @@ import (
 const (
 	defaultAvatar = "bad9cbb852b22fe58e62f3f23c7d63d2"
 )
+const MaxFileSize = 128 * 1024 * 1024
 
 var (
 	avatarSizes = []int{0, 640, 140, 100, 41, 40}
 	lruCache    *lru.Cache[string, string]
 	once        sync.Once
 
-	tlsCipherSuites = []uint16{
-		// AEADs w/ ECDHE
-		tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-		tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-		tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305, tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+	httpClient *http.Client
 
-		// CBC w/ ECDHE
-		tls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, tls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-		tls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, tls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
+	UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36 Edg/87.0.664.66"
+)
 
-		// AEADs w/o ECDHE
-		tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-		tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-
-		// CBC w/o ECDHE
-		tls.TLS_RSA_WITH_AES_128_CBC_SHA,
-		tls.TLS_RSA_WITH_AES_256_CBC_SHA,
-
-		// 3DES
-		tls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA,
-		tls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
-	}
+func init() {
+	insecureSkipVerify, found := os.LookupEnv("InsecureSkipVerify")
+	insecureSkipVerify = strings.ToLower(insecureSkipVerify)
 
 	httpClient = &http.Client{
+		Timeout: 60 * time.Second,
 		Transport: &http.Transport{
 			ForceAttemptHTTP2:   true,
 			MaxConnsPerHost:     0,
 			MaxIdleConns:        0,
 			MaxIdleConnsPerHost: 256,
 			TLSClientConfig: &tls.Config{
-				CipherSuites:       tlsCipherSuites,
-				MinVersion:         tls.VersionTLS10,
-				InsecureSkipVerify: true,
+				MinVersion:         tls.VersionTLS12,
+				InsecureSkipVerify: found && insecureSkipVerify == "true",
 			},
 		},
 	}
-
-	UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36 Edg/87.0.664.66"
-)
+}
 
 func Download(path string) (string, []byte, error) {
 	var fileName string
@@ -96,7 +83,7 @@ func GetBytes(url string) ([]byte, error) {
 		_ = reader.Close()
 	}()
 
-	return io.ReadAll(reader)
+	return io.ReadAll(io.LimitReader(reader, MaxFileSize))
 }
 
 type gzipCloser struct {

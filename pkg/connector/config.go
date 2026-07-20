@@ -36,6 +36,11 @@ func (c *Config) UnmarshalYAML(node *yaml.Node) error {
 }
 
 func (c *Config) PostProcess() error {
+	// 防止错误的配置导致"context deadline exceeded"
+	if c.Onebot.RequestTimeout <= 0 {
+		c.Onebot.RequestTimeout = 60 * time.Second
+	}
+
 	var err error
 	c.displaynameTemplate, err = template.New("displayname").Parse(c.DisplaynameTemplate)
 	return err

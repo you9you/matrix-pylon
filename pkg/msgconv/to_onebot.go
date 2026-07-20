@@ -76,7 +76,7 @@ func (mc *MessageConverter) constructTextMessage(ctx context.Context, content *e
 	matches := re.FindAllString(text, -1)
 
 	var splits []string
-	for i := 0; i < len(parts); i++ {
+	for i := range parts {
 		if parts[i] != "" {
 			splits = append(splits, parts[i])
 		}
@@ -152,7 +152,7 @@ func (mc *MessageConverter) constructLocationMessage(ctx context.Context, name s
 		}
 		`, name, name, name, lat, lng)
 
-		return []onebot.ISegment{onebot.NewJSON(locationJson)}
+		return []onebot.ISegment{onebot.NewJSONSegment(locationJson)}
 	}
 
 	return []onebot.ISegment{onebot.NewLocation(lat, lng, name, name)}
@@ -164,7 +164,7 @@ func parseGeoURI(uri string) (lat, lng float64, err error) {
 		return
 	}
 	// Remove geo: prefix and anything after ;
-	coordinates := strings.Split(strings.TrimPrefix(uri, "geo:"), ";")[0]
+	coordinates, _, _ := strings.Cut(strings.TrimPrefix(uri, "geo:"), ";")
 
 	if splitCoordinates := strings.Split(coordinates, ","); len(splitCoordinates) != 2 {
 		err = fmt.Errorf("didn't find exactly two numbers separated by a comma")

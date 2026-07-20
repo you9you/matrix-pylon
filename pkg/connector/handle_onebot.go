@@ -19,7 +19,10 @@ func (pc *PylonClient) handleOnebotEvent(evt onebot.IEvent) {
 	switch evt.EventType() {
 	case onebot.MessagePrivate, onebot.MessageGroup:
 		msg := evt.(*onebot.Message)
-		if len(msg.Message.([]onebot.ISegment)) == 0 {
+
+		message, ok := msg.Message.([]onebot.ISegment)
+		if !ok || len(message) == 0 {
+			pc.userLogin.Log.Trace().Bool("ok", ok).Msg("无法断言 msg.Message 或 长度为零")
 			return
 		}
 
@@ -133,7 +136,7 @@ func (evt *OnebotMessageEvent) GetChatInfo(ctx context.Context, portal *bridgev2
 	} else {
 		if portal.MXID == "" {
 			evt.postHandle = func() {
-				evt.pc.updateMemberDisplyname(ctx, portal)
+				evt.pc.updateMemberDisplayname(ctx, portal)
 			}
 		}
 		return evt.pc.getGroupChatInfo(ctx, portal)

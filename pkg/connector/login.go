@@ -34,7 +34,7 @@ func (pc *PylonConnector) GetLoginFlows() []bridgev2.LoginFlow {
 	return []bridgev2.LoginFlow{
 		{
 			Name:        "Access token",
-			Description: "Use this token to connect the bridge to yourt account",
+			Description: "Use this token to connect the bridge to your account",
 			ID:          LoginFlowIDToken,
 		},
 	}
@@ -79,7 +79,7 @@ func (tl *TokenLogin) Start(ctx context.Context) (*bridgev2.LoginStep, error) {
 
 func (tl *TokenLogin) Wait(ctx context.Context) (*bridgev2.LoginStep, error) {
 	if tl.client == nil {
-		return nil, fmt.Errorf("loign has not started yet")
+		return nil, fmt.Errorf("login has not started yet")
 	}
 
 	zerolog.Ctx(ctx).Debug().Msgf("Start waiting")

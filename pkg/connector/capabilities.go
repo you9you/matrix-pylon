@@ -22,7 +22,7 @@ func supportedIfFFmpeg() event.CapabilitySupportLevel {
 	return event.CapLevelRejected
 }
 
-func catpID() string {
+func capsID() string {
 	base := "me.lxduo.qq.capabilities.2025_01_16"
 	if ffmpeg.Supported() {
 		return base + "+ffmpeg"
@@ -31,7 +31,7 @@ func catpID() string {
 }
 
 var pylonCaps = &event.RoomFeatures{
-	ID: catpID(),
+	ID: capsID(),
 
 	Formatting: event.FormattingFeatureMap{
 		event.FmtUserLink: event.CapLevelFullySupported,

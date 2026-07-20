@@ -34,13 +34,14 @@ type Client struct {
 	conn     *websocket.Conn
 	connLock sync.Mutex
 
-	isLoggedIn    atomic.Bool
-	statusChannel chan bool
-	cancelChecker context.CancelFunc
+	isLoggedIn        atomic.Bool
+	statusChannel     chan bool
+	cancelChecker     context.CancelFunc
+	cancelCheckerLock sync.RWMutex
 
 	websocketRequests     map[string]chan<- *Response
 	websocketRequestsLock sync.RWMutex
-	websocketRequestID    int64
+	websocketRequestID    atomic.Int64
 }
 
 func NewClient(log zerolog.Logger, id, token string, service *Service) *Client {
@@ -76,7 +77,7 @@ func (c *Client) StartLoop(conn *websocket.Conn) {
 			continue
 		}
 
-		var m map[string]interface{}
+		var m map[string]any
 		if err := json.Unmarshal(message, &m); err != nil {
 			c.log.Warn().Err(err).Msg("Failed to unmarshal JSON")
 			break
@@ -91,7 +92,7 @@ func (c *Client) StartLoop(conn *websocket.Conn) {
 		}
 
 		switch payload.PayloadType() {
-		case PaylaodRequest:
+		case PayloadRequest:
 			c.log.Warn().Msgf("Unsupported request %s", payload.(*Request).Action)
 		case PayloadResponse:
 			go c.handleResponse(payload.(*Response))
@@ -108,9 +109,11 @@ func (c *Client) StartLoop(conn *websocket.Conn) {
 				}
 			case MetaHeartbeat:
 				heartbeat := payload.(*Heartbeat)
+				c.cancelCheckerLock.Lock()
 				if c.cancelChecker == nil {
 					c.startChecker(uint32(heartbeat.Interval))
 				}
+				c.cancelCheckerLock.Unlock()
 				c.statusChannel <- heartbeat.Status.Online
 			}
 		}
@@ -124,12 +127,14 @@ func (c *Client) SetEventHandler(handler func(IEvent)) {
 func (c *Client) Release() {
 	c.updateConnection(nil)
 
+	c.cancelCheckerLock.Lock()
 	if c.cancelChecker != nil {
 		c.cancelChecker()
 		c.cancelChecker = nil
 	}
+	c.cancelCheckerLock.Unlock()
 
-	c.service.removeClient(c.id)
+	c.service.removeClient(c.token)
 }
 
 func (c *Client) GetToken() string {
@@ -180,7 +185,7 @@ func (c *Client) request(req *Request) (any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), c.service.timeout)
 	defer cancel()
 
-	req.Echo = fmt.Sprint(atomic.AddInt64(&c.websocketRequestID, 1))
+	req.Echo = fmt.Sprint(c.websocketRequestID.Add(1))
 
 	respChan := make(chan *Response, 1)
 

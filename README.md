@@ -73,6 +73,7 @@ Some quick links:
     - [x] Mention
     - [x] Reply
     - [x] Location
+    - [x] Forward(m.thread)
   - [ ] Chat types
     - [x] Private
     - [x] Group

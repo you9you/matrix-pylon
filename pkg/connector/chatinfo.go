@@ -4,9 +4,9 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"hash/fnv"
 	"math/rand/v2"
-	"net/url"
-	"path"
+	"strconv"
 	"time"
 
 	"github.com/duo/matrix-pylon/pkg/ids"
@@ -302,7 +302,7 @@ func (pc *PylonClient) doGhostResync(ctx context.Context, queue map[string]resyn
 				if err == nil {
 					info.ExtraUpdates = bridgev2.MergeExtraUpdaters(
 						info.ExtraUpdates,
-						pc.updateMemberDisplyname,
+						pc.updateMemberDisplayname,
 					)
 				}
 				return info, err
@@ -322,17 +322,21 @@ func (pc *PylonClient) doGhostResync(ctx context.Context, queue map[string]resyn
 	}
 }
 
-func (pc *PylonClient) updateMemberDisplyname(ctx context.Context, portal *bridgev2.Portal) bool {
+func (pc *PylonClient) updateMemberDisplayname(ctx context.Context, portal *bridgev2.Portal) bool {
 	_, peerID := ids.ParsePortalID(portal.ID)
 	if members, err := pc.client.GetGroupMemberList(peerID); err == nil {
 		for _, member := range members {
-			memberIntent := portal.GetIntentFor(ctx, pc.makeEventSender(member.UserID), pc.userLogin, bridgev2.RemoteEventChatInfoChange)
+			memberIntent, ok := portal.GetIntentFor(ctx, pc.makeEventSender(member.UserID), pc.userLogin, bridgev2.RemoteEventChatInfoChange)
+			if !ok {
+				zerolog.Ctx(ctx).Error().Msg("Failed to get member info")
+				continue
+			}
 
 			mxid := memberIntent.GetMXID()
 
 			memberInfo, err := portal.Bridge.Matrix.GetMemberInfo(ctx, portal.MXID, mxid)
 			if err != nil {
-				zerolog.Ctx(ctx).Err(err).Msg("Failed to get member info")
+				zerolog.Ctx(ctx).Error().Err(err).Msg("Failed to get member info")
 				continue
 			}
 
@@ -346,7 +350,7 @@ func (pc *PylonClient) updateMemberDisplyname(ctx context.Context, portal *bridg
 				}, zeroTime)
 
 				if err != nil {
-					zerolog.Ctx(ctx).Err(err).Stringer("user_id", mxid).Msg("Failed to update group displayname")
+					zerolog.Ctx(ctx).Error().Err(err).Stringer("user_id", mxid).Msg("Failed to update group displayname")
 				}
 				zerolog.Ctx(ctx).Debug().Stringer("user_id", mxid).Msgf("Update group displayname to %s", displayName)
 			}
@@ -367,8 +371,10 @@ func wrapAvatar(avatarURL string) *bridgev2.Avatar {
 	if avatarURL == "" {
 		return &bridgev2.Avatar{Remove: true}
 	}
-	parsedURL, _ := url.Parse(avatarURL)
-	avatarID := path.Base(parsedURL.Path)
+
+	h := fnv.New64a()
+	h.Write([]byte(avatarURL))
+	avatarID := strconv.FormatUint(h.Sum64(), 16)
 	return &bridgev2.Avatar{
 		ID: networkid.AvatarID(avatarID),
 		Get: func(ctx context.Context) ([]byte, error) {

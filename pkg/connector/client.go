@@ -8,9 +8,9 @@ import (
 
 	"github.com/duo/matrix-pylon/pkg/onebot"
 
-	"maunium.net/go/mautrix/bridge/status"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/bridgev2/networkid"
+	"maunium.net/go/mautrix/bridgev2/status"
 )
 
 type resyncQueueItem struct {

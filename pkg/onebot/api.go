@@ -128,20 +128,28 @@ func (c *Client) DownloadMedia(seg ISegment) (string, []byte, error) {
 	var request *Request
 	var url string
 
+	// 用于日志诊断
+	var file string
+
 	switch v := seg.(type) {
 	case *ImageSegment:
 		request = NewGetImageRequest(v.File())
 		url = v.URL()
+		file = v.File()
 	case *MarketFaceSegment:
 		request = NewGetMarketFaceRequest(v.File())
 		url = v.URL()
+		file = v.File()
 	case *VideoSegment:
 		request = NewGetFileRequest(v.File())
 		url = v.URL()
+		file = v.File()
 	case *FileSegment:
 		request = NewGetFileRequest(v.File())
+		file = v.File()
 	case *RecordSegment:
 		request = NewGetRecordRequest(v.File())
+		file = v.File()
 	default:
 		return "", nil, fmt.Errorf("unsupported media type %+v", v.SegmentType())
 	}
@@ -156,7 +164,8 @@ func (c *Client) DownloadMedia(seg ISegment) (string, []byte, error) {
 		}
 	}
 
-	if resp, err := c.request(request); err == nil {
+	resp, err := c.request(request)
+	if err == nil {
 		var f FileInfo
 		if err := mapstructure.WeakDecode(resp, &f); err != nil {
 			return "", nil, err
@@ -169,9 +178,15 @@ func (c *Client) DownloadMedia(seg ISegment) (string, []byte, error) {
 		}
 	}
 
+	c.log.Warn().
+		Err(err).
+		Str("type", string(seg.SegmentType())).
+		Str("file", file).
+		Msg("failed to download media, trying download from http")
+
 	if strings.HasPrefix(url, "http") {
 		return util.Download(url)
 	}
 
-	return "", nil, fmt.Errorf("failed to download media: %+v", seg)
+	return "", nil, fmt.Errorf("failed to download media: %+v | %w", seg, err)
 }

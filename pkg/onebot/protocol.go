@@ -10,7 +10,7 @@ import (
 type PayloadType string
 
 const (
-	PaylaodRequest  PayloadType = "request"
+	PayloadRequest  PayloadType = "request"
 	PayloadResponse PayloadType = "response"
 	PayloadEvent    PayloadType = "event"
 )
@@ -76,18 +76,18 @@ const (
 	ForwardGroupSingleMsg  RequestType = "forward_group_single_msg"
 	SendForwardMsg         RequestType = "send_forward_msg"
 	MarkPrivateMsgAsRead   RequestType = "mark_private_msg_as_read"
-	MarkGroupMsgAsRead     RequestType = "mark_private_msg_as_read"
+	MarkGroupMsgAsRead     RequestType = "mark_group_msg_as_read"
 	GetFriendMsgHistory    RequestType = "get_friend_msg_history"
 )
 
 type Request struct {
-	Action string                 `json:"action"`
-	Params map[string]interface{} `json:"params,omitempty"`
-	Echo   string                 `json:"echo,omitempty"`
+	Action string         `json:"action"`
+	Params map[string]any `json:"params,omitempty"`
+	Echo   string         `json:"echo,omitempty"`
 }
 
 func (r *Request) PayloadType() PayloadType {
-	return PaylaodRequest
+	return PayloadRequest
 }
 
 func NewGetLoginInfoRequest() *Request {
@@ -97,7 +97,7 @@ func NewGetLoginInfoRequest() *Request {
 func NewGetUserInfoRequest(userID string) *Request {
 	return &Request{
 		Action: string(GetStrangerInfo),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"user_id": userID,
 		},
 	}
@@ -106,7 +106,7 @@ func NewGetUserInfoRequest(userID string) *Request {
 func NewGetGroupInfoRequest(groupID string) *Request {
 	return &Request{
 		Action: string(GetGroupInfo),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"group_id": groupID,
 		},
 	}
@@ -123,7 +123,7 @@ func NewGetGroupListRequest() *Request {
 func NewGetGroupMemberListRequest(groupID string) *Request {
 	return &Request{
 		Action: string(GetGroupMemberList),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"group_id": groupID,
 		},
 	}
@@ -132,7 +132,7 @@ func NewGetGroupMemberListRequest(groupID string) *Request {
 func NewGetGroupMemberInfoRequest(groupID, userID string) *Request {
 	return &Request{
 		Action: string(GetGroupMemberInfo),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"group_id": groupID,
 			"user_id":  userID,
 		},
@@ -142,9 +142,12 @@ func NewGetGroupMemberInfoRequest(groupID, userID string) *Request {
 func NewGetRecordRequest(fileID string) *Request {
 	return &Request{
 		Action: string(GetRecord),
-		Params: map[string]interface{}{
-			"file":       fileID,
-			"out_format": "ogg",
+		Params: map[string]any{
+			"file": fileID,
+
+			// BUG: "Download failed: Encoder not found"
+			// "out_format": "ogg",
+			"out_format": "mp3",
 		},
 	}
 }
@@ -152,7 +155,7 @@ func NewGetRecordRequest(fileID string) *Request {
 func NewGetImageRequest(fileID string) *Request {
 	return &Request{
 		Action: string(GetImage),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"file_id": fileID,
 			"file":    fileID,
 		},
@@ -162,7 +165,7 @@ func NewGetImageRequest(fileID string) *Request {
 func NewGetMarketFaceRequest(fileID string) *Request {
 	return &Request{
 		Action: string(GetImage),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"file_id":  fileID,
 			"file":     fileID,
 			"emoji_id": fileID,
@@ -173,7 +176,7 @@ func NewGetMarketFaceRequest(fileID string) *Request {
 func NewGetFileRequest(fileID string) *Request {
 	return &Request{
 		Action: string(GetFile),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"file_id": fileID,
 			"file":    fileID,
 		},
@@ -183,7 +186,7 @@ func NewGetFileRequest(fileID string) *Request {
 func NewGetForwardMsgRequest(msgID string) *Request {
 	return &Request{
 		Action: string(GetForwardMsg),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"message_id": msgID,
 		},
 	}
@@ -192,7 +195,7 @@ func NewGetForwardMsgRequest(msgID string) *Request {
 func NewPrivateMsgRequest(userID string, segments []ISegment) *Request {
 	return &Request{
 		Action: string(SendMsg),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"message_type": "private",
 			"user_id":      userID,
 			"message":      segments,
@@ -203,7 +206,7 @@ func NewPrivateMsgRequest(userID string, segments []ISegment) *Request {
 func NewGroupMsgRequest(groupID string, segments []ISegment) *Request {
 	return &Request{
 		Action: string(SendMsg),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"message_type": "group",
 			"group_id":     groupID,
 			"message":      segments,
@@ -214,7 +217,7 @@ func NewGroupMsgRequest(groupID string, segments []ISegment) *Request {
 func NewDeleteMsgRequest(messageID string) *Request {
 	return &Request{
 		Action: string(DeleteMsg),
-		Params: map[string]interface{}{
+		Params: map[string]any{
 			"message_id": messageID,
 		},
 	}
@@ -260,6 +263,11 @@ type FileInfo struct {
 	FileName string `json:"file_name,omitempty" mapstructure:"file_name,omitempty"`
 	URL      string `json:"url,omitempty" mapstructure:"url,omitempty"`
 	Base64   string `json:"base64,omitempty" mapstructure:"base64,omitempty"`
+}
+
+// 对应 NapCat get_forward_msg 返回的 data 根节点
+type ForwardInfo struct {
+	Messages []Message `json:"messages" mapstructure:"messages"`
 }
 
 type SendMessageResponse struct {
@@ -431,8 +439,8 @@ type ISegment interface {
 }
 
 type Segment struct {
-	Type string                 `json:"type"`
-	Data map[string]interface{} `json:"data"`
+	Type string         `json:"type"`
+	Data map[string]any `json:"data"`
 }
 
 func (s *Segment) SegmentType() SegmentType {
@@ -604,6 +612,13 @@ func (s *ForwardSegment) ID() string {
 	return s.Data["id"].(string)
 }
 
+func (s *ForwardSegment) Content() ([]Message, error) {
+	var content []Message
+	err := mapstructure.WeakDecode(s.Data["content"], &content)
+
+	return content, err
+}
+
 func (s *NodeSegment) ID() string {
 	return s.Data["id"].(string)
 }
@@ -620,7 +635,7 @@ func NewText(content string) *TextSegment {
 	return &TextSegment{
 		Segment{
 			Type: string(Text),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"text": content,
 			},
 		},
@@ -631,7 +646,7 @@ func NewFace(id string) *FaceSegment {
 	return &FaceSegment{
 		Segment{
 			Type: string(Face),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"id": id,
 			},
 		},
@@ -642,7 +657,7 @@ func NewImage(file, name string) *ImageSegment {
 	return &ImageSegment{
 		Segment: Segment{
 			Type: string(Image),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"file": file,
 				"name": name,
 			},
@@ -654,7 +669,7 @@ func NewRecord(file, name string) *RecordSegment {
 	return &RecordSegment{
 		Segment{
 			Type: string(Record),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"file": file,
 				"name": name,
 			},
@@ -666,7 +681,7 @@ func NewVideo(file, name string) *VideoSegment {
 	return &VideoSegment{
 		Segment{
 			Type: string(Video),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"file": file,
 				"name": name,
 			},
@@ -678,7 +693,7 @@ func NewFile(file, name string) *FileSegment {
 	return &FileSegment{
 		Segment{
 			Type: string(File),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"file": file,
 				"name": name,
 			},
@@ -690,7 +705,7 @@ func NewAt(target string) *AtSegment {
 	return &AtSegment{
 		Segment{
 			Type: string(At),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"qq": target,
 			},
 		},
@@ -701,7 +716,7 @@ func NewReply(id string) *ReplySegment {
 	return &ReplySegment{
 		Segment{
 			Type: string(Reply),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"id": id,
 			},
 		},
@@ -712,7 +727,7 @@ func NewLocation(lat, lon float64, title, content string) *LocationSegment {
 	return &LocationSegment{
 		Segment{
 			Type: string(Location),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"lat":     lat,
 				"lon":     lon,
 				"title":   title,
@@ -722,18 +737,18 @@ func NewLocation(lat, lon float64, title, content string) *LocationSegment {
 	}
 }
 
-func NewJSON(content string) *NodeSegment {
-	return &NodeSegment{
+func NewJSONSegment(content string) *JSONSegment {
+	return &JSONSegment{
 		Segment{
 			Type: string(JSON),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"data": content,
 			},
 		},
 	}
 }
 
-func UnmarshalPayload(m map[string]interface{}) (Payload, error) {
+func UnmarshalPayload(m map[string]any) (Payload, error) {
 	if postType, ok := m["post_type"]; ok {
 		switch postType {
 		case "message":
@@ -757,7 +772,7 @@ func UnmarshalPayload(m map[string]interface{}) (Payload, error) {
 	return nil, errors.New("unsupported payload type")
 }
 
-func unmarshalMeta(m map[string]interface{}) (Payload, error) {
+func unmarshalMeta(m map[string]any) (Payload, error) {
 	switch m["meta_event_type"] {
 	case "lifecycle":
 		var event Lifecycle
@@ -772,7 +787,7 @@ func unmarshalMeta(m map[string]interface{}) (Payload, error) {
 	return unmarshalEvent(m)
 }
 
-func unmarshalNotice(m map[string]interface{}) (Payload, error) {
+func unmarshalNotice(m map[string]any) (Payload, error) {
 	switch m["notice_type"] {
 	case "group_recall":
 		var event GroupRecall
@@ -787,43 +802,65 @@ func unmarshalNotice(m map[string]interface{}) (Payload, error) {
 	return unmarshalEvent(m)
 }
 
-func unmarshalEvent(m map[string]interface{}) (Payload, error) {
+func unmarshalEvent(m map[string]any) (Payload, error) {
 	var event Event
 	err := mapstructure.WeakDecode(m, &event)
 	return &event, err
 }
 
-func unmarshalRequest(m map[string]interface{}) (Payload, error) {
+func unmarshalRequest(m map[string]any) (Payload, error) {
 	var event Request
 	err := mapstructure.WeakDecode(m, &event)
 	return &event, err
 }
 
-func unmarshalResponse(m map[string]interface{}) (Payload, error) {
+func unmarshalResponse(m map[string]any) (Payload, error) {
 	var event Response
 	err := mapstructure.WeakDecode(m, &event)
 	return &event, err
 }
 
-func unmarshalMessage(m map[string]interface{}) (Payload, error) {
+func unmarshalMessage(m map[string]any) (Payload, error) {
 	var event Message
 	if err := mapstructure.WeakDecode(m, &event); err != nil {
 		return nil, err
 	}
 
 	if m["message"] != nil {
-		event.Message = generateSegments(m["message"].([]interface{}))
+		message, ok := m["message"].([]any)
+		if !ok {
+			return nil, fmt.Errorf("无法断言: %v", m["message"])
+		}
+		event.Message = generateSegments(message)
 	} else if m["content"] != nil {
-		event.Message = generateSegments(m["content"].([]interface{}))
+		content, ok := m["content"].([]any)
+		if !ok {
+			return nil, fmt.Errorf("无法断言: %v", m["content"])
+		}
+		event.Message = generateSegments(content)
 	}
 	return &event, nil
 }
 
-func generateSegments(d []interface{}) []ISegment {
+// pkg/msgconv/from_onebot.go#convertForwardMessage 需要
+func GenerateSegments(d []any) []ISegment {
+	return generateSegments(d)
+}
+
+func generateSegments(d []any) []ISegment {
 	segments := []ISegment{}
 
 	for _, s := range d {
-		switch s.(map[string]interface{})["type"].(string) {
+		v, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		t, ok := v["type"].(string)
+		if !ok {
+			continue
+		}
+
+		switch t {
 		case string(Text):
 			var segment TextSegment
 			mapstructure.WeakDecode(s, &segment)

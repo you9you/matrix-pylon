@@ -1,20 +1,48 @@
-FROM golang:1-alpine3.21 AS builder
+FROM golang:alpine AS builder
+
+# 替换为阿里云镜像源（或者 mirrors.tuna.tsinghua.edu.cn）
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
 RUN apk add --no-cache git ca-certificates build-base su-exec olm-dev
 
-COPY . /build
+ENV GOPROXY=https://goproxy.cn,direct
+
 WORKDIR /build
-RUN ./build.sh
 
-FROM alpine:3.21
+# Copy go mod files and download dependencies (cached layer)
+COPY go.mod go.sum /build
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-ENV UID=1337 \
-    GID=1337
+# Build
+COPY . /build
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    ./build.sh
 
-RUN apk add --no-cache ffmpeg su-exec ca-certificates olm bash jq yq-go curl
+# 精简镜像
+FROM alpine
 
-COPY --from=builder /build/matrix-pylon /usr/bin/matrix-pylon
+ENV UID=1337 GID=1337
+
+# 替换为阿里云镜像源（或者 mirrors.tuna.tsinghua.edu.cn）
+# 换源、安装必要包
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+    && apk add --no-cache \
+        su-exec \
+        ca-certificates \
+        olm \
+        yq-go \
+    && rm -rf /var/cache/apk/*
+
+# 从构建阶段复制二进制和修改后的启动脚本
 COPY --from=builder /build/docker-run.sh /docker-run.sh
+COPY --from=builder /build/matrix-pylon /usr/bin/matrix-pylon
+
+# 赋予执行权限
+RUN chmod +x /docker-run.sh
+
+WORKDIR /data
 VOLUME /data
 
 CMD ["/docker-run.sh"]
