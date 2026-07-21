@@ -322,8 +322,8 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 			continue
 		}
 
-		if !hasImage && part == nil {
-			if len(mediaParts) == 1 {
+		if part == nil {
+			if !hasImage && len(mediaParts) == 1 {
 				// 转发者信息
 				*slicePtr = append(*slicePtr, &bridgev2.ConvertedMessagePart{
 					ID:   networkid.PartID(fmt.Sprintf("%d-0", i)),
