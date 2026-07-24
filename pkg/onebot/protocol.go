@@ -611,6 +611,13 @@ func (s *ForwardSegment) ID() string {
 	return s.Data["id"].(string)
 }
 
+func (s *ForwardSegment) Content() ([]Message, error) {
+	var content []Message
+	err := mapstructure.WeakDecode(s.Data["content"], &content)
+
+	return content, err
+}
+
 func (s *NodeSegment) ID() string {
 	return s.Data["id"].(string)
 }
@@ -824,6 +831,11 @@ func unmarshalMessage(m map[string]interface{}) (Payload, error) {
 		event.Message = generateSegments(m["content"].([]interface{}))
 	}
 	return &event, nil
+}
+
+// pkg/msgconv/from_onebot.go#convertForwardMessage 需要
+func GenerateSegments(d []any) []ISegment {
+	return generateSegments(d)
 }
 
 func generateSegments(d []interface{}) []ISegment {

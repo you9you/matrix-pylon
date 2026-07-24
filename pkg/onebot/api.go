@@ -8,6 +8,7 @@ import (
 
 	"github.com/duo/matrix-pylon/pkg/util"
 	"github.com/mitchellh/mapstructure"
+	"github.com/rs/zerolog"
 )
 
 func (c *Client) GetLoginInfo() (*UserInfo, error) {
@@ -125,29 +126,40 @@ func (c *Client) DeleteMessage(messageID string) error {
 }
 
 func (c *Client) DownloadForwardMsg(seg *ForwardSegment) ([]Message, error) {
+	logger := c.log.With().
+		Dict(
+			"seg",
+			zerolog.Dict().
+				Str("id", seg.ID()).
+				Str("type", seg.Type).
+				Dict("data", zerolog.Dict().Fields(seg.Data)),
+		).Logger()
+
 	request := NewGetForwardMsgRequest(seg.ID())
 
 	resp, err := c.request(request)
+	if err != nil {
+		logger.Error().
+			Err(err).
+			Msg("failed to request forward")
+	}
 
-	if err == nil {
+	if resp != nil {
 		var f ForwardInfo
 		if err := mapstructure.WeakDecode(resp, &f); err != nil {
-			return nil, err
-		}
+			logger.Error().
+				Err(err).
+				Any("resp", resp).
+				Msg("failed to decode forward")
 
-		// 需要将 []interface{} 转换为 []ISegment
-		for i, msg := range f.Messages {
-			if msgs, ok := msg.Message.([]any); ok {
-				f.Messages[i].Message = generateSegments(msgs)
-			}
+			return nil, err
 		}
 
 		return f.Messages, nil
 	}
 
-	c.log.Error().
+	logger.Error().
 		Err(err).
-		Str("seg", fmt.Sprintf("%+v", seg)).
 		Msg("failed to download forward")
 
 	return nil, fmt.Errorf("failed to download forward: %+v", seg)

@@ -73,7 +73,7 @@ func (mc *MessageConverter) OnebotToMatrix(
 		case *onebot.RecordSegment:
 
 			//BUG: failed to download attachment: failed to download media: &{Segment:{Type:record Data:map[file:<REMOVE>.amr file_size:31028 path:/app/.config/QQ/nt_qq_<REMOVE>/nt_data/Ptt/2026-07/Ori/<REMOVE>.amr url:https://multimedia.nt.qq.com.cn/download?appid=1402&fileid=<REMOVE>&format=amr&rkey=<REMOVE>]}}
-			// pkg/onebot/protocol.go:148
+			// pkg/onebot/protocol.go#NewGetRecordRequest
 
 			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
 			fmt.Fprint(&contentBuilder, "[Voice]")
@@ -88,7 +88,8 @@ func (mc *MessageConverter) OnebotToMatrix(
 				MessageID: ids.MakeMessageID(ids.GetPeerID(msg), v.ID()),
 			}
 		case *onebot.ForwardSegment:
-			//TODO: 实现显示合并消息
+			// 实现显示合并消息
+			//TODO: 使用协程池加速消息处理
 
 			// 从池子中获取一个已经分配好内存的切片指针
 			slicePtr := slicePool.Get().(*[]*bridgev2.ConvertedMessagePart)
@@ -99,16 +100,23 @@ func (mc *MessageConverter) OnebotToMatrix(
 			// 每次使用前，务必清空长度（保留容量）
 			*slicePtr = (*slicePtr)[:0]
 
-			err := mc.convertForwardMessage(slicePtr, ctx, client, v)
-			if err == nil {
-				// 因为要归还池子，这里必须创建一个独立长度的切片并复制数据
-				finalParts := make([]*bridgev2.ConvertedMessagePart, len(*slicePtr))
-				copy(finalParts, *slicePtr)
-
-				cm.Parts = finalParts
-				return cm
+			// 只需下载一次，嵌套的 forwardMsg 会自动处理
+			data, err := getClient(ctx).DownloadForwardMsg(v)
+			if err != nil {
+				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", fmt.Errorf("failed to download attachment: %w", err))
 			} else {
-				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+				// 最外层 forwardId 应为0
+				err := mc.convertForwardMessage(slicePtr, ctx, client, data, 0)
+				if err == nil {
+					// 因为要归还池子，这里必须创建一个独立长度的切片并复制数据
+					finalParts := make([]*bridgev2.ConvertedMessagePart, len(*slicePtr))
+					copy(finalParts, *slicePtr)
+
+					cm.Parts = finalParts
+					return cm
+				} else {
+					fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+				}
 			}
 
 		case *onebot.ShareSegment:
@@ -233,13 +241,8 @@ func (mc *MessageConverter) convertLocationMessage(name, address string, latitud
 	}
 }
 
-func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.ConvertedMessagePart, ctx context.Context, client *onebot.Client, seg *onebot.ForwardSegment) error {
+func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.ConvertedMessagePart, ctx context.Context, client *onebot.Client, data []onebot.Message, forwardId int) error {
 	//TODO: matrix 使用消息线程（Threading）回复
-
-	data, err := getClient(ctx).DownloadForwardMsg(seg)
-	if err != nil {
-		return fmt.Errorf("failed to download attachment: %w", err)
-	}
 
 	for i, msg := range data {
 		var part *bridgev2.ConvertedMessagePart
@@ -255,7 +258,13 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 		var hasImage = false
 		var isForward = false
 
-		segments := msg.Message.([]onebot.ISegment)
+		msgs, ok := msg.Message.([]any)
+		if !ok {
+			return fmt.Errorf("failed msg.Message as []any")
+		}
+
+		// 需要将 []interface{} 转换为 []ISegment
+		segments := onebot.GenerateSegments(msgs)
 		for _, s := range segments {
 			switch v := s.(type) {
 			case *onebot.TextSegment:
@@ -284,7 +293,7 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 			case *onebot.RecordSegment:
 
 				//BUG: failed to download attachment: failed to download media: &{Segment:{Type:record Data:map[file:<REMOVE>.amr file_size:31028 path:/app/.config/QQ/nt_qq_<REMOVE>/nt_data/Ptt/2026-07/Ori/<REMOVE>.amr url:https://multimedia.nt.qq.com.cn/download?appid=1402&fileid=-<REMOVE>&format=amr&rkey=<REMOVE>]}}
-				// pkg/onebot/protocol.go:148
+				// pkg/onebot/protocol.go#NewGetRecordRequest
 
 				mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
 				fmt.Fprint(&contentBuilder, "[Voice]")
@@ -300,15 +309,22 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 				// }
 				//TODO
 			case *onebot.ForwardSegment:
-				//TODO: 递归实现显示合并消息
+				// 递归实现显示合并消息
 				// fmt.Fprint(&contentBuilder, "[Chat History]")
 
-				err := mc.convertForwardMessage(slicePtr, ctx, client, v)
+				content, err := v.Content()
 				if err == nil {
-					isForward = true
+					// 每次递归 forwardId+1
+					err = mc.convertForwardMessage(slicePtr, ctx, client, content, forwardId+1)
+					if err == nil {
+						isForward = true
+					} else {
+						fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+					}
 				} else {
-					fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+					fmt.Fprintf(&contentBuilder, "[Chat History]: %s", fmt.Errorf("failed to decode content: %w", err))
 				}
+
 			case *onebot.ShareSegment:
 				part = mc.convertShareMessage(v.Title(), v.Content(), v.URL())
 			case *onebot.JSONSegment:
@@ -326,7 +342,7 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 			if !hasImage && len(mediaParts) == 1 {
 				// 转发者信息
 				*slicePtr = append(*slicePtr, &bridgev2.ConvertedMessagePart{
-					ID:   networkid.PartID(fmt.Sprintf("%d-0", i)),
+					ID:   networkid.PartID(fmt.Sprintf("%d-%d-0", forwardId, i)),
 					Type: event.EventMessage,
 					Content: &event.MessageEventContent{
 						MsgType: event.MsgText,
@@ -336,7 +352,7 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 
 				// 文件
 				part = mediaParts[0]
-				part.ID = networkid.PartID(fmt.Sprintf("%d-1", i))
+				part.ID = networkid.PartID(fmt.Sprintf("%d-%d-1", forwardId, i))
 			} else if len(mediaParts) >= 1 { // mixed image and text
 				// mediaParts仅用作判断
 				// var imagesMarkdown strings.Builder
@@ -348,7 +364,7 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 				rendered := format.RenderMarkdown(content, true, false)
 
 				part = &bridgev2.ConvertedMessagePart{
-					ID:   networkid.PartID(fmt.Sprintf("%d", i)),
+					ID:   networkid.PartID(fmt.Sprintf("%d-%d", forwardId, i)),
 					Type: event.EventMessage,
 					Content: &event.MessageEventContent{
 						MsgType:       event.MsgText,
@@ -359,7 +375,7 @@ func (mc *MessageConverter) convertForwardMessage(slicePtr *[]*bridgev2.Converte
 				}
 			} else {
 				part = &bridgev2.ConvertedMessagePart{
-					ID:   networkid.PartID(fmt.Sprintf("%d", i)),
+					ID:   networkid.PartID(fmt.Sprintf("%d-%d", forwardId, i)),
 					Type: event.EventMessage,
 					Content: &event.MessageEventContent{
 						MsgType: event.MsgText,
