@@ -1,9 +1,9 @@
 FROM golang:alpine AS builder
 
-# 替换为阿里云镜像源（或者 mirrors.tuna.tsinghua.edu.cn）
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+# 替换镜像源
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
 
-RUN apk add --no-cache git ca-certificates build-base su-exec olm-dev
+RUN apk add --no-cache git ca-certificates build-base olm-dev
 
 ENV GOPROXY=https://goproxy.cn,direct
 
@@ -23,26 +23,23 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # 精简镜像
 FROM alpine
 
-ENV UID=1337 GID=1337
+# 目标运行用户（UID/GID）。Go 入口逻辑在运行时据此降权并 chown /data
+ARG UID=1337
+ARG GID=1337
+ENV UID=$UID GID=$GID
 
-# 替换为阿里云镜像源（或者 mirrors.tuna.tsinghua.edu.cn）
-# 换源、安装必要包
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories \
+# 替换镜像源
+# 换源、安装必要包（仅保留 ca-certificates 与 olm 运行时依赖）
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories \
     && apk add --no-cache \
-        su-exec \
         ca-certificates \
         olm \
-        yq-go \
     && rm -rf /var/cache/apk/*
 
-# 从构建阶段复制二进制和修改后的启动脚本
-COPY --from=builder /build/docker-run.sh /docker-run.sh
+# 从构建阶段复制二进制（入口逻辑已内置于 binary）
 COPY --from=builder /build/matrix-pylon /usr/bin/matrix-pylon
-
-# 赋予执行权限
-RUN chmod +x /docker-run.sh
 
 WORKDIR /data
 VOLUME /data
 
-CMD ["/docker-run.sh"]
+CMD ["/usr/bin/matrix-pylon"]

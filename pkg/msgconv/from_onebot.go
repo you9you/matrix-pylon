@@ -240,7 +240,12 @@ func (mc *MessageConverter) convertLocationMessage(name, address string, latitud
 func (mc *MessageConverter) convertShareMessage(title, desc, url string) *bridgev2.ConvertedMessagePart {
 	body := fmt.Sprintf("%s\n\n%s\n\n%s", title, desc, url)
 	rendered := format.RenderMarkdown(
-		fmt.Sprintf("**%s**\n%s\n\n[%s](%s)", title, desc, url, url),
+		fmt.Sprintf("**%s**\n%s\n\n[%s](%s)",
+			format.EscapeMarkdown(title),
+			format.EscapeMarkdown(desc),
+			format.EscapeMarkdown(url),
+			format.EscapeMarkdown(url),
+		),
 		true,
 		false,
 	)

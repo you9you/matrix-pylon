@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/duo/matrix-pylon/pkg/config"
 	"github.com/gabriel-vasile/mimetype"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -22,7 +23,6 @@ import (
 const (
 	defaultAvatar = "bad9cbb852b22fe58e62f3f23c7d63d2"
 )
-const MaxFileSize = 128 * 1024 * 1024
 
 var (
 	avatarSizes = []int{0, 640, 140, 100, 41, 40}
@@ -83,7 +83,7 @@ func GetBytes(url string) ([]byte, error) {
 		_ = reader.Close()
 	}()
 
-	return io.ReadAll(io.LimitReader(reader, MaxFileSize))
+	return io.ReadAll(io.LimitReader(reader, config.MaxFileSize))
 }
 
 type gzipCloser struct {

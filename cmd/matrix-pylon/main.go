@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/duo/matrix-pylon/internal/entrypoint"
 	"github.com/duo/matrix-pylon/pkg/connector"
 
 	"maunium.net/go/mautrix/bridgev2/matrix/mxmain"
@@ -15,6 +16,11 @@ var (
 )
 
 func main() {
+	// Container entrypoint bootstrap (replaces the old docker-run.sh):
+	// generates config/registration on first run, fixes permissions, and drops
+	// privileges to the UID/GID from the environment. No-op outside Docker.
+	entrypoint.Handle()
+
 	m := mxmain.BridgeMain{
 		Name:        "mautrix-pylon",
 		URL:         "https://github.com/duo/matrix-pylon",

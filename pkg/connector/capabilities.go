@@ -4,16 +4,13 @@ import (
 	"context"
 	"time"
 
+	"github.com/duo/matrix-pylon/pkg/config"
 	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/jsontime"
 	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 )
-
-const MaxTextLength = 4096
-const MaxFileSize = 128 * 1024 * 1024
-const MaxImageSize = 128 * 1024 * 1024
 
 func supportedIfFFmpeg() event.CapabilitySupportLevel {
 	if ffmpeg.Supported() {
@@ -46,8 +43,8 @@ var pylonCaps = &event.RoomFeatures{
 				"image/gif":  event.CapLevelFullySupported,
 			},
 			Caption:          event.CapLevelDropped,
-			MaxCaptionLength: MaxTextLength,
-			MaxSize:          MaxImageSize,
+			MaxCaptionLength: config.MaxTextLength,
+			MaxSize:          config.MaxImageSize,
 		},
 		event.MsgAudio: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{
@@ -58,7 +55,7 @@ var pylonCaps = &event.RoomFeatures{
 				"audio/amr":  event.CapLevelFullySupported,
 			},
 			Caption: event.CapLevelDropped,
-			MaxSize: MaxFileSize,
+			MaxSize: config.MaxFileSize,
 		},
 		event.CapMsgVoice: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{
@@ -66,7 +63,7 @@ var pylonCaps = &event.RoomFeatures{
 				"audio/ogg":              event.CapLevelFullySupported,
 			},
 			Caption: event.CapLevelDropped,
-			MaxSize: MaxFileSize,
+			MaxSize: config.MaxFileSize,
 		},
 		event.CapMsgSticker: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{
@@ -75,7 +72,7 @@ var pylonCaps = &event.RoomFeatures{
 				"image/jpeg": event.CapLevelFullySupported,
 			},
 			Caption: event.CapLevelDropped,
-			MaxSize: MaxImageSize,
+			MaxSize: config.MaxImageSize,
 		},
 		event.CapMsgGIF: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{
@@ -83,8 +80,8 @@ var pylonCaps = &event.RoomFeatures{
 				"image/gif": event.CapLevelFullySupported,
 			},
 			Caption:          event.CapLevelFullySupported,
-			MaxCaptionLength: MaxTextLength,
-			MaxSize:          MaxImageSize,
+			MaxCaptionLength: config.MaxTextLength,
+			MaxSize:          config.MaxImageSize,
 		},
 		event.MsgVideo: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{
@@ -93,20 +90,20 @@ var pylonCaps = &event.RoomFeatures{
 				"video/webm": supportedIfFFmpeg(),
 			},
 			Caption:          event.CapLevelDropped,
-			MaxCaptionLength: MaxTextLength,
-			MaxSize:          MaxFileSize,
+			MaxCaptionLength: config.MaxTextLength,
+			MaxSize:          config.MaxFileSize,
 		},
 		event.MsgFile: {
 			MimeTypes: map[string]event.CapabilitySupportLevel{
 				"*/*": event.CapLevelFullySupported,
 			},
 			Caption:          event.CapLevelDropped,
-			MaxCaptionLength: MaxTextLength,
-			MaxSize:          MaxFileSize,
+			MaxCaptionLength: config.MaxTextLength,
+			MaxSize:          config.MaxFileSize,
 		},
 	},
 
-	MaxTextLength:   MaxTextLength,
+	MaxTextLength:   config.MaxTextLength,
 	LocationMessage: event.CapLevelFullySupported,
 	Reply:           event.CapLevelFullySupported,
 	Delete:          event.CapLevelFullySupported,

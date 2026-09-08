@@ -60,6 +60,12 @@ func (mc *MessageConverter) constructTextMessage(ctx context.Context, content *e
 		mentions = append(mentions, "room")
 	}
 
+	return constructMentionSegments(text, mentions)
+}
+
+// constructMentionSegments 按 mention 关键词切分文本，
+// 命中的关键词转为 at 段，其余转为 text 段。
+func constructMentionSegments(text string, mentions []string) []onebot.ISegment {
 	if len(mentions) == 0 {
 		return []onebot.ISegment{onebot.NewText(text)}
 	}
@@ -69,7 +75,14 @@ func (mc *MessageConverter) constructTextMessage(ctx context.Context, content *e
 		keywords[i] = "@" + m
 	}
 
-	pattern := strings.Join(keywords, "|")
+	// OID 可能包含正则特殊字符（如 . ( [ \ 等），必须转义后再编译正则：
+	// 否则 MustCompile 会 panic 击穿 worker，或 "." 匹配任意字符导致误判。
+	// 注意：仅拼正则时转义，用于 slices.Contains 匹配的 keywords 保持原文。
+	patterns := make([]string, len(keywords))
+	for i, k := range keywords {
+		patterns[i] = regexp.QuoteMeta(k)
+	}
+	pattern := strings.Join(patterns, "|")
 	re := regexp.MustCompile("(?:" + pattern + ")")
 
 	parts := re.Split(text, -1)
