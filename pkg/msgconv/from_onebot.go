@@ -41,6 +41,8 @@ func (mc *MessageConverter) OnebotToMatrix(
 
 	var contentBuilder strings.Builder
 
+	forwardHandled := false
+
 	segments, ok := msg.Message.([]onebot.ISegment)
 	if !ok {
 
@@ -98,20 +100,40 @@ func (mc *MessageConverter) OnebotToMatrix(
 			}
 		case *onebot.ForwardSegment:
 			// 实现显示合并消息
+			//
+			// 优先调用 get_forward_msg 接口（参数 = 包含 forward 节点的消息的
+			// message_id，而非 forward 节点自身的 data.id —— 用后者 NapCat 会报
+			// retcode 1200），获取完整（含嵌套）内容；失败时回退到事件内联
+			// content。NapCat 的 message_sent 回显/接收事件的内联 content 可能
+			// 只携带占位条目（message_id 错误、message 为空数组），不能仅凭
+			// 非空判断其可用，因此以接口为主。
+			var data []onebot.Message
+			if msg.MessageID != "" {
+				data, _ = client.DownloadForwardMsg(msg.MessageID)
+			}
+			if len(data) == 0 {
+				if inline, err := v.Content(); err == nil && len(inline) > 0 {
+					data = inline
+				} else {
+					zerolog.Ctx(ctx).Warn().
+						Str("message_id", msg.MessageID).
+						Str("forward_id", v.ID()).
+						Msg("Failed to get forward content from both API and inline, skipping this forward")
+				}
+			}
 
-			data, err := v.Content()
-			if err != nil {
-				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", fmt.Errorf("failed to download forwardMsg: %w", err))
-			} else if len(data) == 0 {
-				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", fmt.Errorf("failed to download forwardMsg: %w", fmt.Errorf("len(data) == 0")))
-			} else {
+			if len(data) > 0 {
 				// 最外层 forwardId 应为0
 				parts, err := mc.convertForwardMessage(ctx, client, portal, intent, data, msg, 0)
 				if err == nil {
-					cm.Parts = parts
-					return cm
+					// 同一条消息可能包含多个 forward 段，逐个合并而不是提前 return，
+					// 避免丢弃后续 forward
+					cm.Parts = append(cm.Parts, parts...)
+					forwardHandled = true
 				} else {
-					fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+					zerolog.Ctx(ctx).Warn().Err(err).
+						Str("forward_id", v.ID()).
+						Msg("Failed to convert forward message")
 				}
 			}
 
@@ -122,6 +144,10 @@ func (mc *MessageConverter) OnebotToMatrix(
 		default:
 			fmt.Fprintf(&contentBuilder, "[%s]", v.SegmentType())
 		}
+	}
+
+	if forwardHandled {
+		return cm
 	}
 
 	if part == nil {

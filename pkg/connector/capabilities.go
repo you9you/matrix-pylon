@@ -7,7 +7,6 @@ import (
 	"github.com/duo/matrix-pylon/pkg/config"
 	"go.mau.fi/util/ffmpeg"
 	"go.mau.fi/util/jsontime"
-	"go.mau.fi/util/ptr"
 	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
 )
@@ -106,9 +105,10 @@ var pylonCaps = &event.RoomFeatures{
 	MaxTextLength:   config.MaxTextLength,
 	LocationMessage: event.CapLevelFullySupported,
 	Reply:           event.CapLevelFullySupported,
+	Thread:          event.CapLevelPartialSupport,
 	Delete:          event.CapLevelFullySupported,
 	DeleteForMe:     false,
-	DeleteMaxAge:    ptr.Ptr(jsontime.S(2 * time.Minute)),
+	DeleteMaxAge:    new(jsontime.S(2 * time.Minute)),
 }
 
 func (pc *PylonClient) GetCapabilities(ctx context.Context, portal *bridgev2.Portal) *event.RoomFeatures {

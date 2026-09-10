@@ -73,7 +73,7 @@ func TestGenerateSegments_ForwardContent(t *testing.T) {
 		map[string]any{
 			"type": "forward",
 			"data": map[string]any{
-				"id":      "fw-1",
+				"id": "fw-1",
 				"content": []any{
 					map[string]any{
 						"user_id":    "200",
@@ -122,10 +122,10 @@ func TestGenerateSegments_Nil(t *testing.T) {
 // TestUnmarshalPayload_Message 测试消息 payload 分发
 func TestUnmarshalPayload_Message(t *testing.T) {
 	m := map[string]any{
-		"post_type":   "message",
+		"post_type":    "message",
 		"message_type": "private",
-		"message_id":  "12345",
-		"user_id":     "67890",
+		"message_id":   "12345",
+		"user_id":      "67890",
 		"message": []any{
 			map[string]any{"type": "text", "data": map[string]any{"text": "hi"}},
 		},
@@ -158,11 +158,11 @@ func TestUnmarshalPayload_Message(t *testing.T) {
 // TestUnmarshalPayload_MessageSent 测试 message_sent 类型
 func TestUnmarshalPayload_MessageSent(t *testing.T) {
 	m := map[string]any{
-		"post_type":   "message_sent",
+		"post_type":    "message_sent",
 		"message_type": "private",
-		"message_id":  "99999",
-		"user_id":     "111",
-		"target_id":   "222",
+		"message_id":   "99999",
+		"user_id":      "111",
+		"target_id":    "222",
 		"message": []any{
 			map[string]any{"type": "text", "data": map[string]any{"text": "sent"}},
 		},

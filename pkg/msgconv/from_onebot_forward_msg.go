@@ -19,11 +19,26 @@ import (
 )
 
 // flattenForward 将嵌套 forward 展平为扁平消息列表（保持顺序）
-func flattenForward(data []onebot.Message) ([]onebot.Message, error) {
+//
+// 最外层转发内容已在 from_onebot.go 中通过一次 get_forward_msg 下载，
+// 该接口返回的 forward 段 content 已包含全部嵌套层（NapCat 会一次性展开），
+// 因此这里只读取各段内联的 content 进行递归展开，不再发起额外 API 请求。
+func flattenForward(ctx context.Context, data []onebot.Message) ([]onebot.Message, error) {
 	result := make([]onebot.Message, 0, len(data))
-	var walk func([]onebot.Message) error
-	walk = func(msgs []onebot.Message) error {
-		for _, msg := range msgs {
+	log := zerolog.Ctx(ctx)
+
+	// 深度限制：防御异常嵌套数据导致无限递归
+	const maxForwardDepth = 10
+
+	var walk func(msgs []onebot.Message, depth int) error
+	walk = func(msgs []onebot.Message, depth int) error {
+		if depth > maxForwardDepth {
+			log.Warn().Int("depth", depth).Msg("Max forward depth exceeded, treating remaining messages as leaf nodes")
+			result = append(result, msgs...)
+			return nil
+		}
+		for i := range msgs {
+			msg := msgs[i]
 			segs, ok := msg.Message.([]any)
 			if !ok {
 				return fmt.Errorf("failed msg.Message as []any")
@@ -32,18 +47,23 @@ func flattenForward(data []onebot.Message) ([]onebot.Message, error) {
 			hasForward := false
 			var inner []onebot.Message
 			for _, s := range segments {
-				if f, ok := s.(*onebot.ForwardSegment); ok {
-					hasForward = true
-					content, err := f.Content()
-					if err != nil {
-						return fmt.Errorf("failed to decode content: %w", err)
-					}
-					inner = append(inner, content...)
+				f, ok := s.(*onebot.ForwardSegment)
+				if !ok {
+					continue
 				}
+				hasForward = true
+
+				// 只读取内联 content（最外层 API 下载已填充），不再递归调 API
+				content, err := f.Content()
+				if err != nil || len(content) == 0 {
+					log.Warn().Str("message_id", msg.MessageID).Str("forward_id", f.ID()).Msg("Forward has empty content, using placeholder")
+					inner = append(inner, placeholderForwardMessage(f.ID()))
+					continue
+				}
+				inner = append(inner, content...)
 			}
 			if hasForward {
-				// 保持原语义：msg 内含 forward 时本层不产生 part，展开内部消息
-				if err := walk(inner); err != nil {
+				if err := walk(inner, depth+1); err != nil {
 					return err
 				}
 			} else {
@@ -52,10 +72,45 @@ func flattenForward(data []onebot.Message) ([]onebot.Message, error) {
 		}
 		return nil
 	}
-	if err := walk(data); err != nil {
+	if err := walk(data, 0); err != nil {
 		return nil, err
 	}
+
+	// 诊断日志：输出展平后每条消息的摘要，便于排查"空白 part"等问题
+	for i, m := range result {
+		segs, _ := m.Message.([]any)
+		types := make([]string, 0, len(segs))
+		for _, s := range segs {
+			if v, ok := s.(map[string]any); ok {
+				if t, ok := v["type"].(string); ok {
+					types = append(types, t)
+					continue
+				}
+			}
+			types = append(types, fmt.Sprintf("%T", s))
+		}
+		log.Debug().Int("index", i).
+			Str("msg_id", m.MessageID).
+			Str("sender", m.Sender.Nickname).
+			Strs("segments", types).
+			Msg("Flattened forward message")
+	}
+
 	return result, nil
+}
+
+// placeholderForwardMessage 构造转发内容加载失败时的占位消息
+func placeholderForwardMessage(forwardID string) onebot.Message {
+	text := "[Chat History] 嵌套转发消息加载失败"
+	if forwardID != "" {
+		text = fmt.Sprintf("%s (id: %s)", text, forwardID)
+	}
+	return onebot.Message{
+		Sender: onebot.Sender{Nickname: "unknown"},
+		Message: []any{
+			map[string]any{"type": "text", "data": map[string]any{"text": text}},
+		},
+	}
 }
 
 // 单个消息处理
@@ -71,6 +126,9 @@ func (mc *MessageConverter) convertMessageItem(ctx context.Context, client *oneb
 		format.EscapeMarkdown(msg.Sender.Nickname), format.EscapeMarkdown(msg.Sender.UserID))
 	fmt.Fprint(&contentBuilder, forwardInfo)
 	var hasImage = false
+
+	// 记录 header 长度，用于检测消息是否没有任何可渲染内容
+	headerLen := contentBuilder.Len()
 
 	msgs, ok := msg.Message.([]any)
 	if !ok {
@@ -151,6 +209,16 @@ func (mc *MessageConverter) convertMessageItem(ctx context.Context, client *oneb
 		}
 	}
 
+	// 防御：消息没有任何可渲染内容（如只含 reply/forward 段或空数组）时，
+	// 不能生成只带 "[Forward]nick(uid)" 头的空白 part，改用可见占位符
+	if part == nil && len(mediaParts) == 0 && contentBuilder.Len() == headerLen {
+		zerolog.Ctx(ctx).Warn().
+			Str("msg_id", msg.MessageID).
+			Str("sender", msg.Sender.Nickname).
+			Msg("Forward message has no renderable content, using placeholder")
+		fmt.Fprint(&contentBuilder, "[空消息]\n")
+	}
+
 	if part == nil {
 		if !hasImage && len(mediaParts) == 1 {
 			// 单个 media 且 不是图片(可以直接输出，不需要 markdown 渲染)
@@ -219,8 +287,9 @@ func (mc *MessageConverter) convertForwardMessage(ctx context.Context,
 	forwardId int,
 ) ([]*bridgev2.ConvertedMessagePart, error) {
 
-	// 1. 展平嵌套 forward（matrix 不支持嵌套）
-	flatMsgs, err := flattenForward(data)
+	// 1. 展平嵌套 forward（matrix 不支持嵌套；
+	//    最外层已通过 get_forward_msg 下载完整内容，这里只读取内联 content）
+	flatMsgs, err := flattenForward(ctx, data)
 	if err != nil {
 		return nil, err
 	}
