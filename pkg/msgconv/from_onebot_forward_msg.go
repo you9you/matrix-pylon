@@ -19,9 +19,45 @@ import (
 )
 
 // flattenForward 将嵌套 forward 展平为扁平消息列表（保持顺序）
-func flattenForward(data []onebot.Message) ([]onebot.Message, error) {
+//
+// Onebot 事件中的 forward 段往往只携带最外层 content（甚至完全为空，
+// 如 NapCat 的 message_sent 回显），嵌套 forward 的真实内容需要通过
+// get_forward_msg 接口按 id 下载。否则会漏掉嵌套消息，
+// 导致 thread root 显示的条数仅为最外层数量。
+func flattenForward(ctx context.Context, client *onebot.Client, data []onebot.Message) ([]onebot.Message, error) {
 	result := make([]onebot.Message, 0, len(data))
-	var walk func([]onebot.Message) error
+	log := zerolog.Ctx(ctx)
+
+	// 同一 id 的转发内容只下载一次，避免嵌套层重复请求
+	downloadCache := make(map[string][]onebot.Message)
+
+	// fetchForwardContent 获取转发段的完整消息内容：
+	// 优先使用事件内联的 content，为空时回退到 get_forward_msg 接口下载
+	var fetchForwardContent func(*onebot.ForwardSegment) ([]onebot.Message, error)
+	fetchForwardContent = func(f *onebot.ForwardSegment) ([]onebot.Message, error) {
+		if content, err := f.Content(); err == nil && len(content) > 0 {
+			return content, nil
+		}
+
+		id := f.ID()
+		if id == "" {
+			return nil, fmt.Errorf("forward segment has no id and empty content")
+		}
+
+		if cached, ok := downloadCache[id]; ok {
+			return cached, nil
+		}
+
+		content, err := client.DownloadForwardMsg(f)
+		if err != nil {
+			return nil, err
+		}
+
+		downloadCache[id] = content
+		return content, nil
+	}
+
+	var walk func(msgs []onebot.Message) error
 	walk = func(msgs []onebot.Message) error {
 		for _, msg := range msgs {
 			segs, ok := msg.Message.([]any)
@@ -32,14 +68,20 @@ func flattenForward(data []onebot.Message) ([]onebot.Message, error) {
 			hasForward := false
 			var inner []onebot.Message
 			for _, s := range segments {
-				if f, ok := s.(*onebot.ForwardSegment); ok {
-					hasForward = true
-					content, err := f.Content()
-					if err != nil {
-						return fmt.Errorf("failed to decode content: %w", err)
-					}
-					inner = append(inner, content...)
+				f, ok := s.(*onebot.ForwardSegment)
+				if !ok {
+					continue
 				}
+				hasForward = true
+
+				content, err := fetchForwardContent(f)
+				if err != nil {
+					// 下载失败不中断整体转换：用占位消息替代，保留其余消息
+					log.Warn().Err(err).Str("forward_id", f.ID()).Msg("Failed to fetch forward content, using placeholder")
+					inner = append(inner, placeholderForwardMessage(f.ID()))
+					continue
+				}
+				inner = append(inner, content...)
 			}
 			if hasForward {
 				// 保持原语义：msg 内含 forward 时本层不产生 part，展开内部消息
@@ -56,6 +98,20 @@ func flattenForward(data []onebot.Message) ([]onebot.Message, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// placeholderForwardMessage 构造转发内容加载失败时的占位消息
+func placeholderForwardMessage(forwardID string) onebot.Message {
+	text := "[Chat History] 嵌套转发消息加载失败"
+	if forwardID != "" {
+		text = fmt.Sprintf("%s (id: %s)", text, forwardID)
+	}
+	return onebot.Message{
+		Sender: onebot.Sender{Nickname: "unknown"},
+		Message: []any{
+			map[string]any{"type": "text", "data": map[string]any{"text": text}},
+		},
+	}
 }
 
 // 单个消息处理
@@ -219,8 +275,9 @@ func (mc *MessageConverter) convertForwardMessage(ctx context.Context,
 	forwardId int,
 ) ([]*bridgev2.ConvertedMessagePart, error) {
 
-	// 1. 展平嵌套 forward（matrix 不支持嵌套）
-	flatMsgs, err := flattenForward(data)
+	// 1. 展平嵌套 forward（matrix 不支持嵌套；
+	//    嵌套 content 缺失时通过 get_forward_msg 接口下载）
+	flatMsgs, err := flattenForward(ctx, client, data)
 	if err != nil {
 		return nil, err
 	}

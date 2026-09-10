@@ -41,6 +41,8 @@ func (mc *MessageConverter) OnebotToMatrix(
 
 	var contentBuilder strings.Builder
 
+	forwardHandled := false
+
 	segments, ok := msg.Message.([]onebot.ISegment)
 	if !ok {
 
@@ -98,20 +100,33 @@ func (mc *MessageConverter) OnebotToMatrix(
 			}
 		case *onebot.ForwardSegment:
 			// 实现显示合并消息
-
-			data, err := v.Content()
-			if err != nil {
-				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", fmt.Errorf("failed to download forwardMsg: %w", err))
-			} else if len(data) == 0 {
-				fmt.Fprintf(&contentBuilder, "[Chat History]: %s", fmt.Errorf("failed to download forwardMsg: %w", fmt.Errorf("len(data) == 0")))
+			//
+			// 优先使用事件内联的 content；Onebot 实现（如 NapCat 的
+			// message_sent 回显）可能只携带 id 而 content 为空，
+			// 此时回退到 get_forward_msg 接口按 id 下载完整内容
+			var data []onebot.Message
+			if inline, err := v.Content(); err == nil && len(inline) > 0 {
+				data = inline
+			} else if downloaded, err := client.DownloadForwardMsg(v); err == nil {
+				data = downloaded
 			} else {
+				zerolog.Ctx(ctx).Warn().Err(err).
+					Str("forward_id", v.ID()).
+					Msg("Failed to get forward content, skipping this forward")
+			}
+
+			if len(data) > 0 {
 				// 最外层 forwardId 应为0
 				parts, err := mc.convertForwardMessage(ctx, client, portal, intent, data, msg, 0)
 				if err == nil {
-					cm.Parts = parts
-					return cm
+					// 同一条消息可能包含多个 forward 段，逐个合并而不是提前 return，
+					// 避免丢弃后续 forward
+					cm.Parts = append(cm.Parts, parts...)
+					forwardHandled = true
 				} else {
-					fmt.Fprintf(&contentBuilder, "[Chat History]: %s", err)
+					zerolog.Ctx(ctx).Warn().Err(err).
+						Str("forward_id", v.ID()).
+						Msg("Failed to convert forward message")
 				}
 			}
 
@@ -122,6 +137,10 @@ func (mc *MessageConverter) OnebotToMatrix(
 		default:
 			fmt.Fprintf(&contentBuilder, "[%s]", v.SegmentType())
 		}
+	}
+
+	if forwardHandled {
+		return cm
 	}
 
 	if part == nil {

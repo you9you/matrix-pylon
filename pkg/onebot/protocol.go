@@ -609,7 +609,10 @@ func (s *ReplySegment) ID() string {
 }
 
 func (s *ForwardSegment) ID() string {
-	return s.Data["id"].(string)
+	if v, ok := s.Data["id"].(string); ok {
+		return v
+	}
+	return ""
 }
 
 func (s *ForwardSegment) Content() ([]Message, error) {

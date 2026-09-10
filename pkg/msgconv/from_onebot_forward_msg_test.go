@@ -1,10 +1,17 @@
 package msgconv
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/duo/matrix-pylon/pkg/onebot"
+	"github.com/gorilla/websocket"
+	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 )
 
@@ -58,7 +65,7 @@ func TestFlattenForward_Flat(t *testing.T) {
 		msgText("1", "100", "Alice", "hello"),
 		msgText("2", "200", "Bob", "world"),
 	}
-	got, err := flattenForward(data)
+	got, err := flattenForward(context.Background(), nil, data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -80,7 +87,7 @@ func TestFlattenForward_Nested(t *testing.T) {
 		msgNestedForward("2", "200", "Bob", inner),
 		msgText("3", "500", "Eve", "after"),
 	}
-	got, err := flattenForward(data)
+	got, err := flattenForward(context.Background(), nil, data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -104,7 +111,7 @@ func TestFlattenForward_DeepNested(t *testing.T) {
 	data := []onebot.Message{
 		msgNestedForward("1", "100", "Alice", inner1),
 	}
-	got, err := flattenForward(data)
+	got, err := flattenForward(context.Background(), nil, data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -118,7 +125,7 @@ func TestFlattenForward_DeepNested(t *testing.T) {
 }
 
 func TestFlattenForward_Empty(t *testing.T) {
-	got, err := flattenForward(nil)
+	got, err := flattenForward(context.Background(), nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -135,8 +142,67 @@ func TestFlattenForward_InvalidMessageType(t *testing.T) {
 			Message:   "not-a-slice",
 		},
 	}
-	if _, err := flattenForward(data); err == nil {
+	if _, err := flattenForward(context.Background(), nil, data); err == nil {
 		t.Error("expected error for invalid message type, got nil")
+	}
+}
+
+// TestFlattenForward_NestedEmptyContent_Placeholder
+// 模拟 NapCat message_sent 回显场景：嵌套 forward 段只有 id、content 为空，
+// get_forward_msg 下载失败（client 未连接）时应降级为占位消息，不中断整体转换
+func TestFlattenForward_NestedEmptyContent_Placeholder(t *testing.T) {
+	client := testClient() // 无 websocket 连接 → DownloadForwardMsg 必然失败
+
+	nested := onebot.Message{
+		MessageID:   "2",
+		Sender:      onebot.Sender{UserID: "200", Nickname: "Bob"},
+		MessageType: "group",
+		Message: []any{
+			map[string]any{
+				"type": "forward",
+				"data": map[string]any{
+					"id":      "1234567890",
+					"content": []any{},
+				},
+			},
+		},
+	}
+	data := []onebot.Message{
+		msgText("1", "100", "Alice", "before"),
+		nested,
+		msgText("3", "500", "Eve", "after"),
+	}
+	got, err := flattenForward(context.Background(), client, data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// before + 占位消息 + after = 3
+	if len(got) != 3 {
+		t.Fatalf("expected 3, got %d: %+v", len(got), got)
+	}
+	found := false
+	for _, m := range got {
+		msgs, ok := m.Message.([]any)
+		if !ok {
+			continue
+		}
+		for _, seg := range msgs {
+			sm, ok := seg.(map[string]any)
+			if !ok || sm["type"] != "text" {
+				continue
+			}
+			d, ok := sm["data"].(map[string]any)
+			if !ok {
+				continue
+			}
+			text, _ := d["text"].(string)
+			if strings.Contains(text, "加载失败") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("placeholder message not found in flattened result")
 	}
 }
 
@@ -240,5 +306,182 @@ func TestConvertMessageItem_ShareSegment(t *testing.T) {
 	}
 	if !strings.Contains(local[0].Content.Body, "Test Share") {
 		t.Errorf("body should contain share title, got %q", local[0].Content.Body)
+	}
+}
+
+// mockOnebotServer 启动一个模拟 Onebot 的 websocket 服务端，
+// 对 get_forward_msg 请求返回预置的 data，并返回已连接的 Client
+func mockOnebotServer(t *testing.T, forwardData any) *onebot.Client {
+	t.Helper()
+
+	upgrader := websocket.Upgrader{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		go func() {
+			for {
+				var req map[string]any
+				if err := conn.ReadJSON(&req); err != nil {
+					return
+				}
+				if req["action"] == "get_forward_msg" {
+					resp := map[string]any{
+						"status":  "ok",
+						"retcode": 0,
+						"data":    forwardData,
+						"echo":    req["echo"],
+					}
+					if err := conn.WriteJSON(resp); err != nil {
+						return
+					}
+				}
+			}
+		}()
+	})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	srv := &http.Server{Handler: mux}
+	go srv.Serve(ln)
+
+	u, _ := url.Parse("ws://" + ln.Addr().String())
+	wsConn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		srv.Close()
+		t.Fatalf("dial failed: %v", err)
+	}
+
+	svc := onebot.NewService(zerolog.Nop(), u.String(), 5*time.Second)
+	client := onebot.NewClient(zerolog.Nop(), "test", "", svc)
+	go client.StartLoop(wsConn)
+
+	t.Cleanup(func() {
+		wsConn.Close()
+		client.Release()
+		srv.Close()
+	})
+
+	return client
+}
+
+// TestFlattenForward_NestedEmptyContent_DownloadsViaAPI
+// 模拟 NapCat 的真实行为：嵌套 forward 段只有 id、content 为空，
+// 必须通过 get_forward_msg 接口下载嵌套内容，展平后的数量要包含嵌套消息。
+//
+// mock 数据使用与真实 get_forward_msg 响应相同的结构（数字 ID、图片段、
+// sender 对象），但不包含任何真实用户数据，验证真实数据格式能正确解码并展平。
+func TestFlattenForward_NestedEmptyContent_DownloadsViaAPI(t *testing.T) {
+	client := mockOnebotServer(t, map[string]any{
+		"messages": []any{
+			map[string]any{
+				"self_id":      10000,
+				"user_id":      20000,
+				"time":         1789000001,
+				"message_id":   30001,
+				"message_type": "group",
+				"sender": map[string]any{
+					"user_id":  20000,
+					"nickname": "UserA",
+					"card":     "",
+				},
+				"group_id": 40000,
+				"message": []any{
+					map[string]any{
+						"type": "image",
+						"data": map[string]any{
+							"summary":   "",
+							"file":      "test-image-1.jpg",
+							"sub_type":  0,
+							"url":       "https://example.com/media/test-image-1.jpg",
+							"file_size": "1024",
+						},
+					},
+				},
+				"message_format": "array",
+				"post_type":      "message",
+			},
+			map[string]any{
+				"self_id":      10000,
+				"user_id":      20000,
+				"time":         1789000002,
+				"message_id":   30002,
+				"message_type": "group",
+				"sender": map[string]any{
+					"user_id":  20000,
+					"nickname": "UserB",
+					"card":     "",
+				},
+				"group_id": 40000,
+				"message": []any{
+					map[string]any{"type": "text", "data": map[string]any{"text": "synthetic text"}},
+				},
+				"message_format": "array",
+				"post_type":      "message",
+			},
+		},
+	})
+
+	// 外层节点：1 条普通文本 + 1 条嵌套 forward（content 为空，只有 id）
+	data := []onebot.Message{
+		msgText("1", "100", "Alice", "before"),
+		{
+			MessageID:   "2",
+			Sender:      onebot.Sender{UserID: "200", Nickname: "Bob"},
+			MessageType: "group",
+			Message: []any{
+				map[string]any{
+					"type": "forward",
+					"data": map[string]any{
+						"id":      "fw-1",
+						"content": []any{},
+					},
+				},
+			},
+		},
+	}
+
+	// 重试规避 StartLoop 尚未完成 updateConnection 的竞态
+	var got []onebot.Message
+	var lastErr error
+	for i := 0; i < 50; i++ {
+		var ferr error
+		got, ferr = flattenForward(context.Background(), client, data)
+		lastErr = ferr
+		if ferr == nil && len(got) == 3 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if lastErr != nil {
+		t.Fatalf("flattenForward failed: %v", lastErr)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 (outer 1 + nested 2), got %d", len(got))
+	}
+	// before + 嵌套下载的消息（数字 ID 应弱解码为字符串）
+	if got[0].MessageID != "1" {
+		t.Errorf("got[0].MessageID = %q, want 1", got[0].MessageID)
+	}
+	if got[1].MessageID != "30001" {
+		t.Errorf("got[1].MessageID = %q, want 30001", got[1].MessageID)
+	}
+	if got[2].MessageID != "30002" {
+		t.Errorf("got[2].MessageID = %q, want 30002", got[2].MessageID)
+	}
+	// 嵌套消息的 sender 对象应正确解码
+	if got[1].Sender.Nickname != "UserA" {
+		t.Errorf("got[1].Sender.Nickname = %q, want UserA", got[1].Sender.Nickname)
+	}
+	if got[1].Sender.UserID != "20000" {
+		t.Errorf("got[1].Sender.UserID = %q, want 20000", got[1].Sender.UserID)
+	}
+	// 图片段应保持原始 []any，供 convertMessageItem 的 GenerateSegments 处理
+	if _, ok := got[1].Message.([]any); !ok {
+		t.Errorf("got[1].Message should be []any, got %T", got[1].Message)
 	}
 }
