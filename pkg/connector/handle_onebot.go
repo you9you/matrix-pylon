@@ -42,7 +42,7 @@ func (pc *PylonClient) handleOnebotEvent(evt onebot.IEvent) {
 				MessageType: "private",
 				MessageID:   friendRecall.MessageID,
 				Sender:      onebot.Sender{UserID: friendRecall.UserID},
-				Event:       onebot.Event{Time: friendRecall.Time},
+				Time:        friendRecall.Time,
 				Message: []onebot.ISegment{
 					onebot.NewReply(friendRecall.MessageID),
 					onebot.NewText("[revoke]"),
@@ -60,7 +60,7 @@ func (pc *PylonClient) handleOnebotEvent(evt onebot.IEvent) {
 				MessageID:   groupRecall.MessageID,
 				GroupID:     groupRecall.GroupID,
 				Sender:      onebot.Sender{UserID: groupRecall.UserID},
-				Event:       onebot.Event{Time: groupRecall.Time},
+				Time:        groupRecall.Time,
 				Message: []onebot.ISegment{
 					onebot.NewReply(groupRecall.MessageID),
 					onebot.NewText("[revoke]"),

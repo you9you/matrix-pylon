@@ -27,11 +27,9 @@ func testConverter() *MessageConverter {
 func testPortal() *bridgev2.Portal {
 	return &bridgev2.Portal{
 		Portal: &database.Portal{
-			PortalKey: networkid.PortalKey{
-				ID:       networkid.PortalID("user123"),
-				Receiver: networkid.UserLoginID("user:1"),
-			},
-			MXID: id.RoomID("!test:example.com"),
+			ID:       networkid.PortalID("user\x01123"),
+			Receiver: networkid.UserLoginID("user:1"),
+			MXID:     id.RoomID("!test:example.com"),
 		},
 	}
 }

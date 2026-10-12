@@ -222,10 +222,7 @@ func atoiEnv(key string) int {
 // show version/help).
 func hasSingleShotFlag(args []string) bool {
 	for _, a := range args {
-		name := a
-		if i := strings.IndexByte(a, '='); i >= 0 {
-			name = a[:i]
-		}
+		name, _, _ := strings.Cut(a, "=")
 		switch name {
 		case "-e", "-g", "-h", "-v",
 			"--generate-example-config", "--generate-registration",

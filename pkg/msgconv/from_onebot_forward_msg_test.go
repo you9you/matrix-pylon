@@ -2,16 +2,10 @@ package msgconv
 
 import (
 	"context"
-	"net"
-	"net/http"
-	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/duo/matrix-pylon/pkg/onebot"
-	"github.com/gorilla/websocket"
-	"github.com/rs/zerolog"
 	"maunium.net/go/mautrix/bridgev2"
 )
 
@@ -304,66 +298,6 @@ func TestConvertMessageItem_ShareSegment(t *testing.T) {
 	if !strings.Contains(local[0].Content.Body, "Test Share") {
 		t.Errorf("body should contain share title, got %q", local[0].Content.Body)
 	}
-}
-
-// mockOnebotServer 启动一个模拟 Onebot 的 websocket 服务端，
-// 对 get_forward_msg 请求返回预置的 data，并返回已连接的 Client
-func mockOnebotServer(t *testing.T, forwardData any) *onebot.Client {
-	t.Helper()
-
-	upgrader := websocket.Upgrader{}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
-		}
-		go func() {
-			for {
-				var req map[string]any
-				if err := conn.ReadJSON(&req); err != nil {
-					return
-				}
-				if req["action"] == "get_forward_msg" {
-					resp := map[string]any{
-						"status":  "ok",
-						"retcode": 0,
-						"data":    forwardData,
-						"echo":    req["echo"],
-					}
-					if err := conn.WriteJSON(resp); err != nil {
-						return
-					}
-				}
-			}
-		}()
-	})
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen failed: %v", err)
-	}
-	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln)
-
-	u, _ := url.Parse("ws://" + ln.Addr().String())
-	wsConn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	if err != nil {
-		srv.Close()
-		t.Fatalf("dial failed: %v", err)
-	}
-
-	svc := onebot.NewService(zerolog.Nop(), u.String(), 5*time.Second)
-	client := onebot.NewClient(zerolog.Nop(), "test", "", svc)
-	go client.StartLoop(wsConn)
-
-	t.Cleanup(func() {
-		wsConn.Close()
-		client.Release()
-		srv.Close()
-	})
-
-	return client
 }
 
 // TestFlattenForward_ReceivedForwardFormat

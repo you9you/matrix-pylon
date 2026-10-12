@@ -52,12 +52,12 @@ func startMockOnebot(t *testing.T, forwardData any) (*Client, *http.Server, func
 		t.Fatalf("listen failed: %v", err)
 	}
 	srv := &http.Server{Handler: mux}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 
 	u, _ := url.Parse("ws://" + ln.Addr().String())
 	wsConn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
-		srv.Close()
+		_ = srv.Close()
 		t.Fatalf("dial failed: %v", err)
 	}
 
@@ -66,9 +66,9 @@ func startMockOnebot(t *testing.T, forwardData any) (*Client, *http.Server, func
 	go client.StartLoop(wsConn)
 
 	cleanup := func() {
-		wsConn.Close()
+		_ = wsConn.Close()
 		client.Release()
-		srv.Close()
+		_ = srv.Close()
 	}
 	return client, srv, cleanup
 }
@@ -106,7 +106,7 @@ func TestDownloadForwardMsg(t *testing.T) {
 	// 参数为"包含 forward 节点的消息"的 message_id
 	var msgs []Message
 	var err error
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		msgs, err = client.DownloadForwardMsg("999")
 		if err == nil {
 			break

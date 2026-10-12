@@ -99,3 +99,15 @@ func TestConstructMentionSegments_MultipleMentions(t *testing.T) {
 		t.Errorf("segments = %q, want %q", got, want)
 	}
 }
+
+// TestConstructMentionSegments_Prefix 回归测试：
+// 同时提及 @123 和 @1234 时，"@1234" 必须整体命中，
+// 不能因 @123 是其前缀而被误拆成 at(123)+"4"。
+func TestConstructMentionSegments_Prefix(t *testing.T) {
+	segments := constructMentionSegments("hello @123 and @1234 world", []string{"123", "1234"})
+
+	want := "TEXT:hello ;AT:123;TEXT: and ;AT:1234;TEXT: world;"
+	if got := segmentsSummary(segments); got != want {
+		t.Errorf("segments = %q, want %q", got, want)
+	}
+}

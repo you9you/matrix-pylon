@@ -10,11 +10,11 @@ type UserLoginMetadata struct {
 }
 
 type GhostMetadata struct {
-	LastSync jsontime.Unix `json:"last_sync,omitempty"`
+	LastSync jsontime.Unix `json:"last_sync"`
 }
 
 type PortalMetadata struct {
-	LastSync jsontime.Unix `json:"last_sync,omitempty"`
+	LastSync jsontime.Unix `json:"last_sync"`
 }
 
 func (pc *PylonConnector) GetDBMetaTypes() database.MetaTypes {

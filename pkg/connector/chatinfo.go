@@ -96,7 +96,7 @@ func (pc *PylonClient) getDirectChatInfo(recipient string) (*bridgev2.ChatInfo, 
 	}
 
 	return &bridgev2.ChatInfo{
-		Topic:   ptr.Ptr(DirectChatTopic),
+		Topic:   ptr.Ptr(DirectChatTopic), //nolint:modernize // new(T) 指向零值，与该值不等价
 		Members: members,
 		Type:    ptr.Ptr(database.RoomTypeDM),
 	}, nil
@@ -120,7 +120,7 @@ func (pc *PylonClient) getGroupChatInfo(_ context.Context, portal *bridgev2.Port
 	}
 
 	wrapped := &bridgev2.ChatInfo{
-		Name:   ptr.Ptr(groupInfo.Name),
+		Name:   ptr.Ptr(groupInfo.Name), //nolint:modernize // new(T) 指向零值，与该值不等价
 		Avatar: wrapAvatar(avatarURL),
 		Members: &bridgev2.ChatMemberList{
 			IsFull:           true,
@@ -134,20 +134,21 @@ func (pc *PylonClient) getGroupChatInfo(_ context.Context, portal *bridgev2.Port
 					event.EventReaction:   powerDefault,
 					event.EventRedaction:  powerDefault,
 				},
-				EventsDefault: ptr.Ptr(powerDefault),
-				StateDefault:  ptr.Ptr(powerAdmin),
+				EventsDefault: ptr.Ptr(powerDefault), //nolint:modernize // 锚定具名常量，new(int) 会丢失关联
+				StateDefault:  ptr.Ptr(powerAdmin), //nolint:modernize // new(T) 指向零值，与该值不等价
 			},
 		},
-		Disappear: &database.DisappearingSetting{Type: database.DisappearingTypeNone},
+		Disappear: &database.DisappearingSetting{Type: event.DisappearingTypeNone},
 		Type:      ptr.Ptr(database.RoomTypeDefault),
 	}
 
 	for _, m := range membersInfo {
 		evtSender := pc.makeEventSender(m.UserID)
 		pl := powerDefault
-		if m.Role == "owner" {
+		switch m.Role {
+		case "owner":
 			pl = powerSuperAdmin
-		} else if m.Role == "admin" {
+		case "admin":
 			pl = powerAdmin
 		}
 
@@ -171,7 +172,7 @@ func (pc *PylonClient) contactToUserInfo(contact *onebot.UserInfo) *bridgev2.Use
 		IsBot:        nil,
 		Identifiers:  []string{},
 		ExtraUpdates: updateGhostLastSyncAt,
-		Name: ptr.Ptr(pc.main.Config.FormatDisplayname(DisplaynameParams{
+		Name: ptr.Ptr(pc.main.Config.FormatDisplayname(DisplaynameParams{ //nolint:modernize // new(T) 指向零值，与该值不等价
 			Alias: contact.Remark,
 			Name:  contact.Nickname,
 			ID:    contact.ID,
@@ -191,7 +192,7 @@ func (pc *PylonClient) EnqueueGhostResync(ghost *bridgev2.Ghost) {
 		pc.resyncQueue[id] = resyncQueueItem{ghost: ghost}
 		pc.userLogin.Log.Debug().
 			Str("id", id).
-			Stringer("next_resync_in", time.Until(pc.nextResync)).
+			Stringer("next_resync_in", time.Until(pc.nextResyncTime())).
 			Msg("Enqueued resync for ghost")
 	}
 	pc.resyncQueueLock.Unlock()
@@ -209,7 +210,7 @@ func (pc *PylonClient) EnqueuePortalResync(portal *bridgev2.Portal) {
 		pc.resyncQueue[id] = resyncQueueItem{portal: portal}
 		pc.userLogin.Log.Debug().
 			Str("id", id).
-			Stringer("next_resync_in", time.Until(pc.nextResync)).
+			Stringer("next_resync_in", time.Until(pc.nextResyncTime())).
 			Msg("Enqueued resync for portal")
 	}
 	pc.resyncQueueLock.Unlock()
@@ -218,9 +219,9 @@ func (pc *PylonClient) EnqueuePortalResync(portal *bridgev2.Portal) {
 func (pc *PylonClient) ghostResyncLoop(ctx context.Context) {
 	log := pc.userLogin.Log.With().Str("action", "ghost resync loop").Logger()
 	ctx = log.WithContext(ctx)
-	pc.nextResync = time.Now().Add(resyncLoopInterval).Add(-time.Duration(rand.IntN(3600)) * time.Second)
-	timer := time.NewTimer(time.Until(pc.nextResync))
-	log.Info().Time("first_resync", pc.nextResync).Msg("Ghost resync queue starting")
+	pc.nextResync.Store(time.Now().Add(resyncLoopInterval).Add(-time.Duration(rand.IntN(3600)) * time.Second).UnixNano())
+	timer := time.NewTimer(time.Until(pc.nextResyncTime()))
+	log.Info().Time("first_resync", pc.nextResyncTime()).Msg("Ghost resync queue starting")
 
 	for {
 		select {
@@ -231,7 +232,7 @@ func (pc *PylonClient) ghostResyncLoop(ctx context.Context) {
 		}
 
 		queue := pc.rotateResyncQueue()
-		timer.Reset(time.Until(pc.nextResync))
+		timer.Reset(time.Until(pc.nextResyncTime()))
 		if len(queue) > 0 {
 			pc.doGhostResync(ctx, queue)
 		} else {
@@ -243,7 +244,7 @@ func (pc *PylonClient) ghostResyncLoop(ctx context.Context) {
 func (pc *PylonClient) rotateResyncQueue() map[string]resyncQueueItem {
 	pc.resyncQueueLock.Lock()
 	defer pc.resyncQueueLock.Unlock()
-	pc.nextResync = time.Now().Add(resyncLoopInterval)
+	pc.nextResync.Store(time.Now().Add(resyncLoopInterval).UnixNano())
 	if len(pc.resyncQueue) == 0 {
 		return nil
 	}
@@ -290,13 +291,11 @@ func (pc *PylonClient) doGhostResync(ctx context.Context, queue map[string]resyn
 
 	for _, portal := range portals {
 		pc.main.Bridge.QueueRemoteEvent(pc.userLogin, &simplevent.ChatResync{
-			EventMeta: simplevent.EventMeta{
-				Type: bridgev2.RemoteEventChatResync,
-				LogContext: func(c zerolog.Context) zerolog.Context {
-					return c.Str("sync_reason", "queue")
-				},
-				PortalKey: portal.PortalKey,
+			Type: bridgev2.RemoteEventChatResync,
+			LogContext: func(c zerolog.Context) zerolog.Context {
+				return c.Str("sync_reason", "queue")
 			},
+			PortalKey: portal.PortalKey,
 			GetChatInfoFunc: func(ctx context.Context, portal *bridgev2.Portal) (*bridgev2.ChatInfo, error) {
 				info, err := pc.GetChatInfo(ctx, portal)
 				if err == nil {

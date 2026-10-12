@@ -53,7 +53,7 @@ func (pc *PylonConnector) GetName() bridgev2.BridgeName {
 		NetworkIcon:      "mxc://matrix.org/AwZtDXoKWtgHvcaDAQhbFvfH",
 		NetworkID:        "pylon",
 		BeeperBridgeType: "pylon",
-		DefaultPort:      23456,
+		DefaultPort:      23457,
 	}
 }
 

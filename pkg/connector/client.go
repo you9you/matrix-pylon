@@ -26,7 +26,13 @@ type PylonClient struct {
 	stopLoops       atomic.Pointer[context.CancelFunc]
 	resyncQueue     map[string]resyncQueueItem
 	resyncQueueLock sync.Mutex
-	nextResync      time.Time
+	// nextResync 为 Unix 纳秒（atomic 存取，跨 goroutine 读）
+	nextResync atomic.Int64
+}
+
+// nextResyncTime 原子读取下次 resync 时间。
+func (pc *PylonClient) nextResyncTime() time.Time {
+	return time.Unix(0, pc.nextResync.Load())
 }
 
 var (

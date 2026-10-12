@@ -82,7 +82,7 @@ func TestParsePortalID(t *testing.T) {
 		wantType PeerType
 		wantID   string
 	}{
-		{"group portal", "group123456", PeerTypeGroup, "123456"},
+				{"group portal", "group\x01123456", PeerTypeGroup, "123456"},
 		{"user portal (no separator)", "42", PeerTypeUser, "42"},
 	}
 

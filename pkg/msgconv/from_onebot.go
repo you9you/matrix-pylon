@@ -63,11 +63,13 @@ func (mc *MessageConverter) OnebotToMatrix(
 	}
 
 	for _, s := range segments {
+		if p, handled := mc.renderSegment(ctx, client, s, &contentBuilder, &mediaParts); handled {
+			if p != nil {
+				part = p
+			}
+			continue
+		}
 		switch v := s.(type) {
-		case *onebot.TextSegment:
-			fmt.Fprint(&contentBuilder, convertOnebotEmoji(client, v.Content()))
-		case *onebot.FaceSegment:
-			fmt.Fprint(&contentBuilder, convertOnebotFace(client, v.ID()))
 		case *onebot.AtSegment:
 			target := v.Target()
 			if target == "all" {
@@ -81,19 +83,6 @@ func (mc *MessageConverter) OnebotToMatrix(
 		case *onebot.MarketFaceSegment:
 			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
 			fmt.Fprint(&contentBuilder, "[Image]")
-		case *onebot.RecordSegment:
-
-			//BUG: failed to download attachment: failed to download media: &{Segment:{Type:record Data:map[file:<REMOVE>.amr file_size:31028 path:/app/.config/QQ/nt_qq_<REMOVE>/nt_data/Ptt/2026-07/Ori/<REMOVE>.amr url:https://multimedia.nt.qq.com.cn/download?appid=1402&fileid=<REMOVE>&format=amr&rkey=<REMOVE>]}}
-			// pkg/onebot/protocol.go#NewGetRecordRequest
-
-			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
-			fmt.Fprint(&contentBuilder, "[Voice]")
-		case *onebot.VideoSegment:
-			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
-			fmt.Fprint(&contentBuilder, "[Video]")
-		case *onebot.FileSegment:
-			mediaParts = append(mediaParts, mc.convertMediaMessage(ctx, v))
-			fmt.Fprint(&contentBuilder, "[File]")
 		case *onebot.ReplySegment:
 			cm.ReplyTo = &networkid.MessageOptionalPartID{
 				MessageID: ids.MakeMessageID(ids.GetPeerID(msg), v.ID()),
@@ -137,12 +126,6 @@ func (mc *MessageConverter) OnebotToMatrix(
 				}
 			}
 
-		case *onebot.ShareSegment:
-			part = mc.convertShareMessage(v.Title(), v.Content(), v.URL())
-		case *onebot.JSONSegment:
-			part = mc.convertJSONMessage(ctx, v)
-		default:
-			fmt.Fprintf(&contentBuilder, "[%s]", v.SegmentType())
 		}
 	}
 

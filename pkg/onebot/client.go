@@ -98,7 +98,16 @@ func (c *Client) StartLoop(conn *websocket.Conn) {
 			go c.handleResponse(payload.(*Response))
 		case PayloadEvent:
 			if c.eventHandler != nil {
-				go c.eventHandler(payload.(IEvent))
+				go func() {
+					defer func() {
+						// agent 发来坏数据时，handler 深层的裸类型断言（protocol.go
+						// 各 Segment getter）会 panic——在此 recover，避免击穿整个桥进程
+						if r := recover(); r != nil {
+							c.log.Error().Any("panic", r).Msg("Event handler panicked, dropping event")
+						}
+					}()
+					c.eventHandler(payload.(IEvent))
+				}()
 			}
 
 			switch payload.(IEvent).EventType() {
@@ -113,8 +122,10 @@ func (c *Client) StartLoop(conn *websocket.Conn) {
 				if c.cancelChecker == nil {
 					c.startChecker(uint32(heartbeat.Interval))
 				}
-				c.cancelCheckerLock.Unlock()
+				// 在锁内发送：Release 需持同一把锁才能取消 checker，
+				// 因此发送时 checker 必然存活，不会永久阻塞
 				c.statusChannel <- heartbeat.Status.Online
+				c.cancelCheckerLock.Unlock()
 			}
 		}
 	}
@@ -176,7 +187,7 @@ func (c *Client) updateConnection(conn *websocket.Conn) {
 	defer c.connLock.Unlock()
 
 	if c.conn != nil {
-		c.conn.Close()
+		_ = c.conn.Close()
 	}
 	c.conn = conn
 }
@@ -252,5 +263,6 @@ func (c *Client) removeWebsocketResponseWaiter(echo string, waiter chan<- *Respo
 		delete(c.websocketRequests, echo)
 	}
 	c.websocketRequestsLock.Unlock()
-	close(waiter)
+	// 不能 close(waiter)：请求超时后读循环可能仍持有 channel 引用，
+	// 对 closed channel 发送会 panic 击穿进程；requester 侧 select 本就有 ctx 超时兜底
 }

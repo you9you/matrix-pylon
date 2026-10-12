@@ -24,10 +24,11 @@ func (pc *PylonClient) HandleMatrixMessage(ctx context.Context, msg *bridgev2.Ma
 	}
 
 	if msg.ReplyTo != nil {
-		if _, msgID, err := ids.ParseMessageID(msg.ReplyTo.ID); err != nil {
-			return nil, err
-		} else {
+		if _, msgID, err := ids.ParseMessageID(msg.ReplyTo.ID); err == nil {
 			segments = append([]onebot.ISegment{onebot.NewReply(msgID)}, segments...)
+		} else {
+			// 回复目标是 fake 消息（如 [revoke] 占位）或无效 ID：忽略引用，消息照常发送
+			pc.userLogin.Log.Debug().Err(err).Msg("Dropping reply-to for fake or invalid message ID")
 		}
 	}
 

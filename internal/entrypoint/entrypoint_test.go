@@ -8,15 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// overrideDataDir swaps defaultDataDir for the duration of a test and restores
-// the original on cleanup.
-func overrideDataDir(t *testing.T, v string) {
-	t.Helper()
-	old := defaultDataDir
-	defaultDataDir = v
-	t.Cleanup(func() { defaultDataDir = old })
-}
-
 func TestFlagValue(t *testing.T) {
 	cases := []struct {
 		name   string

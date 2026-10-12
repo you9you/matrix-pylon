@@ -74,6 +74,8 @@ func constructMentionSegments(text string, mentions []string) []onebot.ISegment 
 	for i, m := range mentions {
 		keywords[i] = "@" + m
 	}
+	// 按长度降序：防止前缀 OID（@123）在更长 OID（@1234）处先命中，把 "@1234" 误拆成 at(123)+"4"
+	slices.SortFunc(keywords, func(a, b string) int { return len(b) - len(a) })
 
 	// OID 可能包含正则特殊字符（如 . ( [ \ 等），必须转义后再编译正则：
 	// 否则 MustCompile 会 panic 击穿 worker，或 "." 匹配任意字符导致误判。

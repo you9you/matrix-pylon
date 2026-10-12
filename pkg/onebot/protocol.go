@@ -226,7 +226,7 @@ func NewDeleteMsgRequest(messageID string) *Request {
 type Response struct {
 	Status  string `json:"status"`
 	Retcode int32  `json:"retcode"`
-	Data    any    `json:"params,omitempty"`
+	Data    any    `json:"data,omitempty"`
 	Echo    string `json:"echo,omitempty"`
 }
 
@@ -330,7 +330,7 @@ type Message struct {
 	GroupID     string    `json:"group_id,omitempty" mapstructure:"group_id,omitempty"`
 	UserID      string    `json:"user_id" mapstructure:"user_id"`
 	TargetID    string    `json:"target_id,omitempty" mapstructure:"target_id,omitempty"`
-	Anonymous   Anonymous `json:"anonymous,omitempty" mapstructure:"anonymous,omitempty"`
+	Anonymous   Anonymous `json:"anonymous" mapstructure:"anonymous"`
 	Message     any       `json:"message" mapstructure:"message"`
 	Font        int32     `json:"font" mapstructure:"font"`
 	Sender      Sender    `json:"sender" mapstructure:"sender"`
@@ -658,12 +658,10 @@ func NewFace(id string) *FaceSegment {
 
 func NewImage(file, name string) *ImageSegment {
 	return &ImageSegment{
-		Segment: Segment{
-			Type: string(Image),
-			Data: map[string]any{
-				"file": file,
-				"name": name,
-			},
+		Type: string(Image),
+		Data: map[string]any{
+			"file": file,
+			"name": name,
 		},
 	}
 }
@@ -850,6 +848,26 @@ func GenerateSegments(d []any) []ISegment {
 	return generateSegments(d)
 }
 
+// segmentNew 按 OneBot 段类型返回新段，decode 失败时跳过该段
+//（协议弱类型，防御 agent 发来的坏数据——零值段会让后续 Content() 断言 panic）
+var segmentNew = map[string]func() ISegment{
+	string(Text):       func() ISegment { return &TextSegment{} },
+	string(Face):       func() ISegment { return &FaceSegment{} },
+	string(MarketFace): func() ISegment { return &MarketFaceSegment{} },
+	string(Image):      func() ISegment { return &ImageSegment{} },
+	string(Record):     func() ISegment { return &RecordSegment{} },
+	string(Video):      func() ISegment { return &VideoSegment{} },
+	string(File):       func() ISegment { return &FileSegment{} },
+	string(At):         func() ISegment { return &AtSegment{} },
+	string(Share):      func() ISegment { return &ShareSegment{} },
+	string(Location):   func() ISegment { return &LocationSegment{} },
+	string(Reply):      func() ISegment { return &ReplySegment{} },
+	string(Forward):    func() ISegment { return &ForwardSegment{} },
+	string(Node):       func() ISegment { return &NodeSegment{} },
+	string(XML):        func() ISegment { return &XMLSegment{} },
+	string(JSON):       func() ISegment { return &JSONSegment{} },
+}
+
 func generateSegments(d []any) []ISegment {
 	segments := []ISegment{}
 
@@ -862,68 +880,11 @@ func generateSegments(d []any) []ISegment {
 		if !ok {
 			continue
 		}
-
-		switch t {
-		case string(Text):
-			var segment TextSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Face):
-			var segment FaceSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(MarketFace):
-			var segment MarketFaceSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Image):
-			var segment ImageSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Record):
-			var segment RecordSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Video):
-			var segment VideoSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(File):
-			var segment FileSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(At):
-			var segment AtSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Share):
-			var segment ShareSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Location):
-			var segment LocationSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Reply):
-			var segment ReplySegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Forward):
-			var segment ForwardSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(Node):
-			var segment NodeSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(XML):
-			var segment XMLSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
-		case string(JSON):
-			var segment JSONSegment
-			mapstructure.WeakDecode(s, &segment)
-			segments = append(segments, &segment)
+		if newSeg, ok := segmentNew[t]; ok {
+			seg := newSeg()
+			if err := mapstructure.WeakDecode(s, &seg); err == nil {
+				segments = append(segments, seg)
+			}
 		}
 	}
 
