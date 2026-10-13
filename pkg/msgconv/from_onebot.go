@@ -135,12 +135,7 @@ func (mc *MessageConverter) OnebotToMatrix(
 
 	if part == nil {
 		if len(segments) > 1 && len(mediaParts) >= 1 { // mixed image and text
-			var imagesMarkdown strings.Builder
-			for _, part := range mediaParts {
-				fmt.Fprintf(&imagesMarkdown, "![%s](%s)\n", part.Content.FileName, part.Content.URL)
-			}
-
-			rendered := format.RenderMarkdown(imagesMarkdown.String(), true, false)
+			rendered := format.RenderMarkdown(renderImageMarkdown(mediaParts), true, false)
 			content := contentBuilder.String()
 			part = &bridgev2.ConvertedMessagePart{
 				Type: event.EventMessage,
@@ -184,6 +179,26 @@ func (mc *MessageConverter) convertMediaMessage(ctx context.Context, seg onebot.
 	} else {
 		return part
 	}
+}
+
+// imageMarkdownLine 生成单条 markdown 图片行。alt/url 必须转义 markdown 保留
+// 字符：QQ 图片文件名常含未配对括号（如 XKWXIZ0_[C4R{7V6F4Q}TTX.jpg），裸拼
+// 会让 ![alt](url) 被 goldmark 误解析成「文字 + 链接」而非 <img>（bug-20261012）。
+// 混排消息与合并转发共用此助手，保证所有图片 markdown 都走同一转义逻辑。
+func imageMarkdownLine(alt, url string) string {
+	return fmt.Sprintf("![%s](%s)\n",
+		format.EscapeMarkdown(alt),
+		format.EscapeMarkdown(url))
+}
+
+// renderImageMarkdown 把重传后的媒体 part 拼成 markdown 图片语法，供
+// 「图片+文字」混排消息渲染成单条 HTML 消息。
+func renderImageMarkdown(parts []*bridgev2.ConvertedMessagePart) string {
+	var b strings.Builder
+	for _, part := range parts {
+		b.WriteString(imageMarkdownLine(part.Content.FileName, string(part.Content.URL)))
+	}
+	return b.String()
 }
 
 func (mc *MessageConverter) convertJSONMessage(_ context.Context, seg *onebot.JSONSegment) *bridgev2.ConvertedMessagePart {

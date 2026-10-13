@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/duo/matrix-pylon/pkg/onebot"
+	"maunium.net/go/mautrix/bridgev2"
 	"maunium.net/go/mautrix/event"
+	"maunium.net/go/mautrix/format"
 )
 
 // msgFromRaw 与生产路径 unmarshalMessage 一致：用 GenerateSegments 生成 []onebot.ISegment
@@ -253,5 +255,27 @@ func TestConvertShareMessage_EmptyFields(t *testing.T) {
 	mc := testConverter()
 	if part := mc.convertShareMessage("", "", ""); part == nil || part.Content == nil {
 		t.Fatal("expected non-nil part with empty inputs")
+	}
+}
+
+// TestRenderImageMarkdown_BracketedFilename 复现 bug-20261012：
+// QQ 图片文件名常含未配对括号（XKWXIZ0_[C4R{7V6F4Q}TTX.jpg）。未转义时
+// ![alt](url) 会被 goldmark 误解析成「文字 + 链接」而非 <img>，导致图片无法
+// 渲染。修复后必须渲染出 <img> 标签并保留 mxc URL。
+func TestRenderImageMarkdown_BracketedFilename(t *testing.T) {
+	parts := []*bridgev2.ConvertedMessagePart{{
+		Content: &event.MessageEventContent{
+			FileName: "XKWXIZ0_[C4R{7V6F4Q}TTX.jpg",
+			URL:      "mxc://example.com/someMediaID",
+		},
+	}}
+
+	rendered := format.RenderMarkdown(renderImageMarkdown(parts), true, false)
+
+	if !strings.Contains(rendered.FormattedBody, "<img") {
+		t.Fatalf("expected an <img> tag, got %q", rendered.FormattedBody)
+	}
+	if !strings.Contains(rendered.FormattedBody, "mxc://example.com/someMediaID") {
+		t.Errorf("image url missing from <img>: %q", rendered.FormattedBody)
 	}
 }

@@ -161,7 +161,7 @@ func (mc *MessageConverter) convertMessageItem(ctx context.Context, client *oneb
 				if filename == "" {
 					filename = "image"
 				}
-				fmt.Fprintf(&contentBuilder, "![%s](%s)\n", filename, p.Content.URL)
+				contentBuilder.WriteString(imageMarkdownLine(filename, string(p.Content.URL)))
 			} else {
 				// 图片上传失败，显示占位符而不是空链接
 				zerolog.Ctx(ctx).Warn().Msg("Image upload failed in forward, using placeholder")
@@ -176,7 +176,7 @@ func (mc *MessageConverter) convertMessageItem(ctx context.Context, client *oneb
 				if filename == "" {
 					filename = "image"
 				}
-				fmt.Fprintf(&contentBuilder, "![%s](%s)\n", filename, p.Content.URL)
+				contentBuilder.WriteString(imageMarkdownLine(filename, string(p.Content.URL)))
 			} else {
 				zerolog.Ctx(ctx).Warn().Msg("MarketFace upload failed in forward, using placeholder")
 				fmt.Fprint(&contentBuilder, "[表情-上传失败]\n")
