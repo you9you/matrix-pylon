@@ -18,6 +18,7 @@ const (
 	contextKeyClient contextKey = iota
 	contextKeyIntent
 	contextKeyPortal
+	contextKeyPreferHTTP // forward 消息媒体优先走 http 直链下载
 )
 
 func (mc *MessageConverter) parseText(ctx context.Context, content *event.MessageEventContent) (text string, mentions []string) {

@@ -180,7 +180,11 @@ func (c *Client) DownloadForwardMsg(messageID string) ([]Message, error) {
 	return nil, fmt.Errorf("failed to download forward %s: %w", messageID, lastErr)
 }
 
-func (c *Client) DownloadMedia(seg ISegment) (string, []byte, error) {
+// DownloadMedia 下载媒体。preferHTTP=true 时（forward 消息）优先走 http 直链：
+// get_image/get_file 对转发的媒体文件常 context deadline exceeded，而
+// data.url（图片 qpic 直链）或 data.file（本身是 http 直链的文件）可直接下载。
+// 直链失败不直接 return，继续走下方 API 路径兜底。
+func (c *Client) DownloadMedia(seg ISegment, preferHTTP bool) (string, []byte, error) {
 	var request *Request
 	var url string
 
@@ -208,6 +212,18 @@ func (c *Client) DownloadMedia(seg ISegment) (string, []byte, error) {
 		file = v.File()
 	default:
 		return "", nil, fmt.Errorf("unsupported media type %+v", v.SegmentType())
+	}
+
+	if preferHTTP {
+		if strings.HasPrefix(url, "http") {
+			if name, data, err := util.Download(url); err == nil {
+				return name, data, nil
+			}
+		} else if strings.HasPrefix(file, "http") {
+			if name, data, err := util.Download(file); err == nil {
+				return name, data, nil
+			}
+		}
 	}
 
 	if seg.SegmentType() == MarketFace || seg.SegmentType() == Video ||

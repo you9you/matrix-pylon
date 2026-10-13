@@ -290,7 +290,8 @@ func (mc *MessageConverter) reploadAttachment(ctx context.Context, seg onebot.IS
 		Info: &event.FileInfo{},
 	}
 
-	fileName, data, err := getClient(ctx).DownloadMedia(seg)
+	preferHTTP := ctx.Value(contextKeyPreferHTTP) == true
+	fileName, data, err := getClient(ctx).DownloadMedia(seg, preferHTTP)
 	if err != nil {
 		return nil, fmt.Errorf("failed to download attachment: %w", err)
 	}

@@ -269,6 +269,9 @@ func (mc *MessageConverter) convertForwardMessage(ctx context.Context,
 	msg *onebot.Message,
 	forwardId int,
 ) ([]*bridgev2.ConvertedMessagePart, error) {
+	// forward 消息里的媒体优先走 http 直链：get_image/get_file 对转发的媒体文件
+	// 常 context deadline exceeded，而 data.url/data.file 直链可直接下载。
+	ctx = context.WithValue(ctx, contextKeyPreferHTTP, true)
 
 	// 1. 展平嵌套 forward（matrix 不支持嵌套；
 	//    最外层已通过 get_forward_msg 下载完整内容，这里只读取内联 content）

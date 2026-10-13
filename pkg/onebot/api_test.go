@@ -1,8 +1,11 @@
 package onebot
 
 import (
+	"bytes"
+	"encoding/base64"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -143,5 +146,91 @@ func TestDownloadForwardMsg_EmptyID(t *testing.T) {
 
 	if _, err := client.DownloadForwardMsg(""); err == nil {
 		t.Error("expected error for empty message_id, got nil")
+	}
+}
+
+// TestDownloadMedia_PreferHTTP 验证 forward 媒体（preferHTTP=true）优先走 http
+// 直链而非 get_image API：让 http 服务与 API 返回不同内容，preferHTTP 必须取
+// http 内容（bug：forward 媒体 get_image 常 context deadline exceeded）。
+// 若移除 preferHTTP 分支，本测试首条断言会拿到 apiPayload 而失败。
+func TestDownloadMedia_PreferHTTP(t *testing.T) {
+	httpPayload := []byte("FROM-HTTP-DIRECT-LINK")
+	httpSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(httpPayload)
+	}))
+	defer httpSrv.Close()
+
+	apiPayload := []byte("FROM-API-GET-IMAGE")
+	// 模拟 OneBot WS：get_image 返回 base64(apiPayload)（与 http 内容不同）
+	upgrader := websocket.Upgrader{}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		go func() {
+			for {
+				var req Request
+				if err := conn.ReadJSON(&req); err != nil {
+					return
+				}
+				resp := map[string]any{
+					"status":  "ok",
+					"retcode": 0,
+					"echo":    req.Echo,
+					"data": map[string]any{
+						"file_name": "api.jpg",
+						"base64":    base64.StdEncoding.EncodeToString(apiPayload),
+					},
+				}
+				if err := conn.WriteJSON(resp); err != nil {
+					return
+				}
+			}
+		}()
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
+
+	u, _ := url.Parse("ws://" + ln.Addr().String())
+	wsConn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer func() { _ = wsConn.Close() }()
+
+	svc := NewService(zerolog.Nop(), u.String(), 5*time.Second)
+	client := NewClient(zerolog.Nop(), "test", "", svc)
+	defer client.Release()
+	go client.StartLoop(wsConn)
+	time.Sleep(100 * time.Millisecond) // 等 StartLoop 就绪，避免首个请求竞态
+
+	seg := &ImageSegment{Segment: Segment{Type: string(Image), Data: map[string]any{ //nolint:modernize
+		"file": "hash.jpg",
+		"url":  httpSrv.URL,
+	}}}
+
+	// preferHTTP=true：必须取 http 直链内容，而非 get_image 返回的 apiPayload
+	_, data, err := client.DownloadMedia(seg, true)
+	if err != nil {
+		t.Fatalf("preferHTTP download failed: %v", err)
+	}
+	if !bytes.Equal(data, httpPayload) {
+		t.Errorf("preferHTTP data = %q, want %q", data, httpPayload)
+	}
+
+	// preferHTTP=false：走 get_image API，返回 apiPayload（证明两条路径内容不同）
+	_, dataAPI, err := client.DownloadMedia(seg, false)
+	if err != nil {
+		t.Fatalf("api download failed: %v", err)
+	}
+	if !bytes.Equal(dataAPI, apiPayload) {
+		t.Errorf("api data = %q, want %q", dataAPI, apiPayload)
 	}
 }
